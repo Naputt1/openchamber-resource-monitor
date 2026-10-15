@@ -22,7 +22,7 @@ describe('commandArguments', () => {
 });
 
 describe('processLabel', () => {
-  const row = (name: string, command: string, ports: number[] = []): ProcessRow => ({ pid: 1, ppid: 0, name, command, cpu: null, memory: 0, depth: 1, ports });
+  const row = (name: string, command: string, ports: number[] = []): ProcessRow => ({ pid: 1, ppid: 0, name, label: name, command, cpu: null, memory: 0, ports });
   const helpers = '/Applications/OpenChamber.app/Contents/Frameworks';
 
   test('names Electron helpers by their role', () => {

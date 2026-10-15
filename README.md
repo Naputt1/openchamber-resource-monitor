@@ -2,9 +2,9 @@
 
 See what your machine is doing and how much of it OpenChamber takes: CPU and memory for the whole system, for OpenChamber and OpenCode with everything they started, and for the dev servers running under them.
 
-The rail panel has live CPU and memory charts, a per-core strip, and OpenChamber's footprint split into the app, OpenCode (with the commands, MCP servers and dev servers agents started), and the built-in terminal. Dev servers are listed with their ports, who started them, and what they cost. A short readout in the chat's Work Status panel shows the same numbers at a glance.
+The rail panel has live CPU and memory charts and OpenChamber's footprint split into the app, OpenCode, and the built-in terminal. What an agent or the terminal started is shown as jobs: one row per command (`bun run dev`, `claude`) with the CPU, memory and ports of everything under it, folded by default; unfold one to see the processes in it worth a look. Dev servers are listed with their ports, who started them, and what they cost. A short readout in the chat's Work Status panel shows the same numbers at a glance.
 
-It only reads. Nothing in it stops or changes a process.
+Stop on a dev server or a terminal job ends that command with everything it started, so a watcher can't start the server again. Stop all in the Terminal group ends everything running in the terminal and project actions and keeps the tabs open. The service decides what Stop may touch on a fresh read of the tree: OpenChamber itself, the OpenCode server, idle shells, and an agent's job that serves no port (a provider CLI, an MCP server) are refused whatever the panel asks. Processes get SIGTERM, and SIGKILL three seconds later if they are still there; on Windows, `taskkill /T` and then `/F`.
 
 ## Install
 

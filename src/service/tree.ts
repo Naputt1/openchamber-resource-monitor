@@ -1,8 +1,12 @@
 // Which processes are OpenChamber's, and what they are. Pure, so it is tested.
 import type { RawProcess } from './parse.ts';
-import type { DevServer, GroupId, Percent, ProcessGroup, ProcessRow } from '../shared/snapshot.ts';
+import type { DevServer, GroupId, Job, Percent, ProcessGroup, ProcessRow } from '../shared/snapshot.ts';
 
 export const GROUP_PROCESS_LIMIT = 60;
+/** A job member worth a row of its own: busy, big, or listening. */
+const NOTABLE_CPU = 1;
+const NOTABLE_MEMORY = 40 * 1024 * 1024;
+const JOB_MEMBERS_MAX = 8;
 const COMMAND_MAX = 400;
 
 export interface TreeMember {
@@ -94,6 +98,83 @@ export const classifyBranches = (
   return groups;
 };
 
+/** Which part of OpenChamber a tree member belongs to. */
+export const groupResolver = (
+  members: ReadonlyMap<number, TreeMember>,
+  commands: ReadonlyMap<number, string>,
+): ((member: TreeMember) => GroupId) => {
+  const branches = classifyBranches(members, commands);
+  return (member) => (member.depth === 0 ? 'app' : branches.get(member.branch) ?? 'app');
+};
+
+/** The OpenCode server the app talks to; it answers on a port but is not a dev server. */
+export const isOpenCodeServer = (member: TreeMember, group: GroupId, commands: ReadonlyMap<number, string>): boolean => (
+  group === 'opencode' && isOpenCodeName(member.process.name)
+  && (member.depth === 1 || servesOpenCode(member.process.name, commands.get(member.process.pid) ?? ''))
+);
+
+/** Every pid under `pid` that is in the tree, `pid` first. */
+export const subtreePids = (members: ReadonlyMap<number, TreeMember>, pid: number): number[] => {
+  const pids: number[] = [];
+  const seen = new Set<number>();
+  const stack = [pid];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current) || !members.has(current)) continue;
+    seen.add(current);
+    pids.push(current);
+    for (const member of members.values()) if (member.process.ppid === current && member.process.pid !== current) stack.push(member.process.pid);
+  }
+  return pids;
+};
+
+/**
+ * Jobs: each thing an agent or the terminal started, keyed by its top pid
+ * and holding everything under it. Under OpenCode that is every child of the
+ * OpenCode server (a command, an MCP server, a provider CLI). In the terminal
+ * it is what an interactive shell runs, or a project action that exec'd into
+ * its command. The app's own processes are never a job.
+ */
+export const findJobTops = (
+  members: ReadonlyMap<number, TreeMember>,
+  commands: ReadonlyMap<number, string>,
+  groupOf: (member: TreeMember) => GroupId = groupResolver(members, commands),
+): Map<number, GroupId> => {
+  const tops = new Map<number, GroupId>();
+  const openCodeServers = new Set([...members.values()]
+    .filter((member) => isOpenCodeServer(member, groupOf(member), commands))
+    .map((member) => member.process.pid));
+  const isTerminalShell = (member: TreeMember | undefined): boolean => member !== undefined
+    && member.depth === 1 && isShellName(member.process.name) && groupOf(member) === 'terminals';
+  for (const member of members.values()) {
+    const group = groupOf(member);
+    const { pid, ppid, name } = member.process;
+    if (group === 'opencode' && openCodeServers.has(ppid)) tops.set(pid, group);
+    if (group !== 'terminals') continue;
+    if (member.depth === 1 && !isShellName(name)) tops.set(pid, group);
+    if (isTerminalShell(members.get(ppid))) tops.set(pid, group);
+  }
+  return tops;
+};
+
+/**
+ * A job's title: the command as typed, more or less. Runtimes keep their
+ * arguments with paths cut to file names (`node dev-web-hmr.mjs`, `bun run dev`);
+ * anything else is its name (`claude`, not a screen of flags).
+ */
+export const jobTitle = (name: string, command: string): string => {
+  const base = normalizedName(name);
+  if (!RUNTIMES.has(base)) return name.replace(/\.exe$/i, '');
+  const tokens = command.replace(/^"([^"]+)"/, (_, path: string) => path.replace(/\s/g, '\u0000')).trim().split(/\s+/);
+  if (tokens.length === 0 || !tokens[0]) return name.replace(/\.exe$/i, '');
+  const words = tokens.slice(0, 5).map((token, index) => {
+    const plain = token.replace(/\u0000/g, ' ');
+    const file = plain.replace(/^.*[\\/]/, '');
+    return index === 0 ? file.replace(/\.exe$/i, '') : file;
+  });
+  return `${words.join(' ')}${tokens.length > 5 ? ' …' : ''}`;
+};
+
 const RUNTIMES = new Set(['node', 'bun', 'deno', 'python', 'python3', 'ruby', 'php', 'java', 'npm', 'pnpm', 'yarn', 'npx', 'bunx', 'uv', 'go', 'cargo', 'dotnet']);
 
 /** A readable name for a listening process: `vite` for `node .../vite/bin/vite.js dev`. */
@@ -137,19 +218,18 @@ export interface TreeView {
 const GROUP_ORDER: GroupId[] = ['app', 'opencode', 'terminals'];
 
 export const buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, ports }: BuildInput): TreeView => {
-  const branches = classifyBranches(members, commands);
-  const groupOf = (member: TreeMember): GroupId => (member.depth === 0 ? 'app' : branches.get(member.branch) ?? 'app');
+  const groupOf = groupResolver(members, commands);
   const children = childrenOf(processes);
   const byPid = new Map(processes.map((process) => [process.pid, process]));
-  const row = (process: RawProcess, depth: number): ProcessRow => ({
+  const row = (process: RawProcess): ProcessRow => ({
     pid: process.pid,
     ppid: process.ppid,
     name: process.pid === selfPid ? 'Resource Monitor' : process.name.replace(/\.exe$/i, ''),
+    label: process.pid === selfPid ? 'Resource Monitor' : describeProcess(process.name, commands.get(process.pid) ?? ''),
     // The service's command line is the app's runtime running this package: noise.
     command: process.pid === selfPid ? '' : trimCommand(commands.get(process.pid) ?? ''),
     cpu: cpu.get(process.pid) ?? null,
     memory: process.memory,
-    depth,
     // The service's own loopback port is how OpenChamber talks to it, not a server of yours.
     ports: process.pid === selfPid ? [] : [...(ports.get(process.pid) ?? [])].sort((a, b) => a - b),
   });
@@ -172,41 +252,60 @@ export const buildTreeView = ({ members, processes, rootPid, selfPid, cpu, comma
     return total;
   };
 
+  const jobTops = findJobTops(members, commands, groupOf);
+  const jobOf = new Map<number, number>();
+  for (const top of jobTops.keys()) for (const pid of subtreePids(members, top)) jobOf.set(pid, top);
+
+  const job = (top: TreeMember): Job => {
+    const rows = subtreePids(members, top.process.pid).flatMap((pid) => {
+      const member = members.get(pid);
+      return member ? [row(member.process)] : [];
+    });
+    const command = commands.get(top.process.pid) ?? '';
+    // Wrappers (`bun run dev` → node → node) cost nothing; only rows worth reading stay.
+    const notable = rows
+      .filter((entry) => (entry.cpu ?? 0) >= NOTABLE_CPU || entry.memory >= NOTABLE_MEMORY || entry.ports.length > 0)
+      .sort((a, b) => b.memory - a.memory);
+    return {
+      pid: top.process.pid,
+      name: top.process.name.replace(/\.exe$/i, ''),
+      title: jobTitle(top.process.name, command),
+      command: trimCommand(command),
+      cpu: rows.reduce((sum, entry) => sum + (entry.cpu ?? 0), 0),
+      memory: rows.reduce((sum, entry) => sum + entry.memory, 0),
+      ports: [...new Set(rows.flatMap((entry) => entry.ports))].sort((a, b) => a - b),
+      count: rows.length,
+      members: notable.slice(0, JOB_MEMBERS_MAX),
+    };
+  };
+
   const groups: ProcessGroup[] = [];
   for (const id of GROUP_ORDER) {
     const inGroup = [...members.values()].filter((member) => groupOf(member) === id);
     if (inGroup.length === 0) continue;
-    // The app group starts at the root; the others at the root's children that lead them.
-    const tops = inGroup
-      .filter((member) => (id === 'app' ? member.depth === 0 : member.depth === 1))
-      .sort((a, b) => b.process.memory - a.process.memory);
-    // Depth-first, heaviest sibling first, so the expensive branch reads top-down.
-    const ordered: ProcessRow[] = [];
-    const visit = (member: TreeMember, depth: number): void => {
-      ordered.push(row(member.process, depth));
-      if (member.process.pid === selfPid) return;
-      const kids = (children.get(member.process.pid) ?? [])
-        .map((child) => members.get(child.pid))
-        .filter((child): child is TreeMember => child !== undefined && groupOf(child) === id)
-        .sort((a, b) => b.process.memory - a.process.memory);
-      for (const kid of kids) visit(kid, depth + 1);
-    };
-    for (const top of tops) visit(top, 0);
-    const totalCpu = inGroup.reduce((sum, member) => sum + (cpu.get(member.process.pid) ?? 0), 0);
-    const totalMemory = inGroup.reduce((sum, member) => sum + member.process.memory, 0);
+    // What isn't part of a job is listed flat: the app's own processes, the
+    // OpenCode server, idle terminal shells. The root leads, then by memory.
+    const own = inGroup
+      .filter((member) => !jobOf.has(member.process.pid))
+      .sort((a, b) => a.depth - b.depth || b.process.memory - a.process.memory)
+      .map((member) => row(member.process));
+    const jobs = inGroup
+      .filter((member) => jobTops.has(member.process.pid))
+      .map(job)
+      .sort((a, b) => b.memory - a.memory);
     groups.push({
       id,
-      cpu: totalCpu,
-      memory: totalMemory,
-      processes: ordered.slice(0, GROUP_PROCESS_LIMIT),
-      hidden: Math.max(0, ordered.length - GROUP_PROCESS_LIMIT),
+      cpu: inGroup.reduce((sum, member) => sum + (cpu.get(member.process.pid) ?? 0), 0),
+      memory: inGroup.reduce((sum, member) => sum + member.process.memory, 0),
+      count: inGroup.length,
+      processes: own.slice(0, GROUP_PROCESS_LIMIT),
+      jobs: jobs.slice(0, GROUP_PROCESS_LIMIT),
     });
   }
 
   // The OpenCode server answers the app on a port too; that is not a dev server.
   const openCodeServers = new Set([...members.values()]
-    .filter((member) => isOpenCodeName(member.process.name) && groupOf(member) === 'opencode'
-      && (member.depth === 1 || servesOpenCode(member.process.name, commands.get(member.process.pid) ?? '')))
+    .filter((member) => isOpenCodeServer(member, groupOf(member), commands))
     .map((member) => member.process.pid));
   // Dev servers are what agents and the terminal started. The app's own children
   // (other extensions' services, tunnel helpers) listen on ports too, but they are
@@ -217,6 +316,7 @@ export const buildTreeView = ({ members, processes, rootPid, selfPid, cpu, comma
     const { pid, name } = member.process;
     if (!listening?.length || groupOf(member) === 'app' || openCodeServers.has(pid)) continue;
     const command = commands.get(pid) ?? '';
+    const jobTop = members.get(jobOf.get(pid) ?? -1);
     servers.push({
       pid,
       name: describeProcess(name, command),
@@ -225,6 +325,7 @@ export const buildTreeView = ({ members, processes, rootPid, selfPid, cpu, comma
       ports: [...listening].sort((a, b) => a - b),
       group: groupOf(member),
       ...subtree(pid, true),
+      job: jobTop ? { pid: jobTop.process.pid, name: jobTop.process.name.replace(/\.exe$/i, ''), title: jobTitle(jobTop.process.name, commands.get(jobTop.process.pid) ?? '') } : null,
     });
   }
   servers.sort((a, b) => (a.ports[0] ?? 0) - (b.ports[0] ?? 0));
@@ -233,7 +334,7 @@ export const buildTreeView = ({ members, processes, rootPid, selfPid, cpu, comma
     .filter((process) => !members.has(process.pid) && isOpenCodeName(process.name))
     // A child opencode under another opencode is the same instance's helper.
     .filter((process) => !isOpenCodeName(byPid.get(process.ppid)?.name ?? ''))
-    .map((process) => ({ ...row(process, 0), ...subtree(process.pid, false) }))
+    .map((process) => ({ ...row(process), ...subtree(process.pid, false) }))
     .sort((a, b) => b.memory - a.memory);
 
   const total = subtree(rootPid, true);

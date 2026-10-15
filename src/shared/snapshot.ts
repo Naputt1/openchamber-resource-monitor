@@ -17,25 +17,43 @@ export interface ProcessRow {
   pid: number;
   ppid: number;
   name: string;
+  /** What it is, for a row: `vite` for `node .../vite.js`, otherwise the name. */
+  label: string;
   /** Trimmed command line; empty when the OS would not tell us. */
   command: string;
   /** `null` until two samples exist. */
   cpu: Percent | null;
   /** Resident memory in bytes. */
   memory: number;
-  /** Depth under the group's first process, for indentation. */
-  depth: number;
   ports: number[];
+}
+
+/** One thing an agent or the terminal started, with everything it started in turn. */
+export interface Job {
+  /** The top process; Stop takes this pid and name. */
+  pid: number;
+  name: string;
+  /** `bun run dev`, `claude`. */
+  title: string;
+  command: string;
+  cpu: Percent;
+  memory: number;
+  /** Every port any process in the job listens on. */
+  ports: number[];
+  count: number;
+  /** Only the processes worth a row (busy, big, or listening), heaviest first. */
+  members: ProcessRow[];
 }
 
 export interface ProcessGroup {
   id: GroupId;
   cpu: Percent;
   memory: number;
-  /** Tree order: a parent comes right before its children. */
+  /** Every process in the group. */
+  count: number;
+  /** Processes outside any job: the app's own, the OpenCode server, idle shells. */
   processes: ProcessRow[];
-  /** Processes left out past the per-group limit. */
-  hidden: number;
+  jobs: Job[];
 }
 
 export interface DevServer {
@@ -50,6 +68,8 @@ export interface DevServer {
   /** CPU and memory of the listening process and everything under it. */
   cpu: Percent;
   memory: number;
+  /** The job that started it, which Stop ends as a whole; `null` when it has none. */
+  job: { pid: number; name: string; title: string } | null;
 }
 
 export interface Series {

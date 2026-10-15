@@ -4,6 +4,8 @@ import os from 'node:os';
 
 import type { RawProcess } from './parse.ts';
 import type { ProcessSource } from './sources.ts';
+import { stopProcesses } from './kill.ts';
+import { planStop, type StopTarget } from './stop.ts';
 import { buildTreeView, collectTree, isOpenCodeName, type TreeView } from './tree.ts';
 import { HISTORY_POINTS, type Percent, type Snapshot, type SystemStats, type Warning } from '../shared/snapshot.ts';
 
@@ -121,6 +123,22 @@ export class Sampler {
       this.portsWarning = true;
     }
     return this.portsCache;
+  }
+
+  /**
+   * Stops a dev server or what runs in the terminal, planned on a fresh read.
+   * `null` when the target isn't something Stop may touch (anymore).
+   */
+  async stop(target: StopTarget): Promise<{ stopped: number; survived: number } | null> {
+    const processes = await this.source.list();
+    const members = collectTree(processes, this.rootPid, this.selfPid);
+    const commands = await this.commandsFor(processes, [...members.keys()]);
+    const plan = planStop(members, commands, target);
+    if (plan === null) return null;
+    const { pids } = plan;
+    if (plan.needsPort && (await this.source.ports(pids)).size === 0) return null;
+    const survived = await stopProcesses(pids);
+    return { stopped: pids.length - survived.length, survived: survived.length };
   }
 
   async sample(): Promise<Snapshot> {

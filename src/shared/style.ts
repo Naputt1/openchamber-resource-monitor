@@ -47,37 +47,42 @@ export const PANEL_STYLE = `
   .section { display: flex; flex-direction: column; gap: 6px; }
   .section-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px; }
   .section-head .grow { flex: 1; }
-  .empty { color: var(--oc-muted); padding: 10px 12px; border: 1px dashed var(--oc-border); border-radius: var(--oc-radius); }
-  .servers { display: flex; flex-direction: column; border: 1px solid var(--oc-border); border-radius: var(--oc-radius); overflow: hidden; }
-  .server { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 8px 12px; }
-  .server + .server { border-top: 1px solid var(--oc-border); }
-  .server .title { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
-  .server .title b { font-weight: 600; }
-  .origin { font-size: 10px; padding: 0 5px; border-radius: 4px; line-height: 16px; border: 1px solid var(--oc-border); color: var(--oc-muted); }
-  .server .stats { text-align: right; white-space: nowrap; }
-  .server .command { grid-column: 1 / -1; color: var(--oc-muted); font: 11px var(--oc-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .table { border: 1px solid var(--oc-border); border-radius: var(--oc-radius); overflow: hidden; }
-  .thead, details.group > summary, .proc { display: grid; grid-template-columns: minmax(0, 1fr) 60px 72px; align-items: center; column-gap: 8px; }
-  .thead { padding: 6px 12px; color: var(--oc-muted); font-size: 11px; border-bottom: 1px solid var(--oc-border); }
+  .empty { color: var(--oc-muted); padding: 6px 2px; }
+  .origin { font-size: 10px; padding: 0 5px; border-radius: 4px; line-height: 16px; border: 1px solid var(--oc-border); color: var(--oc-muted); flex: none; }
+  /* Lists sit on the panel itself: rows divided by hairlines, no boxes inside boxes. */
+  .list { display: flex; flex-direction: column; }
+  .cols, .row, .group-head { display: grid; grid-template-columns: minmax(0, 1fr) 56px 72px; align-items: center; column-gap: 8px; }
+  .cols { padding: 0 2px 4px; color: var(--oc-muted); font-size: 11px; border-bottom: 1px solid var(--oc-border); }
   .cell { text-align: right; white-space: nowrap; }
   .quiet { color: var(--oc-muted); }
-  details.group + details.group { border-top: 1px solid var(--oc-border); }
-  details.group > summary { list-style: none; padding: 8px 12px; cursor: pointer; user-select: none; }
-  details.group > summary::-webkit-details-marker { display: none; }
-  details.group > summary:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; }
+  .row { padding: 7px 2px; border-bottom: 1px solid color-mix(in srgb, var(--oc-border) 55%, transparent); }
+  .list > .row:last-child, .group > :last-child .row, .group > .row:last-child { border-bottom-color: transparent; }
+  .group { display: flex; flex-direction: column; padding-bottom: 6px; border-bottom: 1px solid var(--oc-border); }
+  .group-head { padding: 12px 2px 4px; }
   .gname { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .gname b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gname .count { color: var(--oc-muted); }
-  .chevron { flex: none; width: 12px; height: 12px; color: var(--oc-muted); transition: transform .15s ease; }
-  details.group[open] .chevron { transform: rotate(90deg); }
+  .count { color: var(--oc-muted); font-weight: 400; }
   .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
-  .rows { padding: 0 0 6px; }
-  /* Names line up under the group name (past the chevron and dot), then step in per level. */
-  .proc { padding: 4px 12px 4px calc(36px + var(--depth, 0) * 14px); }
-  .who { display: flex; flex-direction: column; min-width: 0; }
-  .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .title-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .pname.strong { font-weight: 600; flex: none; max-width: 50%; }
   .pdetail { color: var(--oc-muted); font: 11px/1.35 var(--oc-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .more { color: var(--oc-muted); padding: 4px 12px 2px 36px; }
+  .job.foldable { cursor: pointer; }
+  .job.foldable .title-line::before { content: ''; flex: none; width: 0; height: 0; margin: 0 2px 0 1px;
+    border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
+  .job.foldable.open .title-line::before { transform: rotate(90deg); }
+  .job.foldable:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; border-radius: 4px; }
+  .members { display: flex; flex-direction: column; padding: 0 0 4px 14px; border-bottom: 1px solid color-mix(in srgb, var(--oc-border) 55%, transparent); }
+  .row.member { padding: 4px 2px; border-bottom: none; font-size: 11.5px; }
+  .row.member .pname { color: var(--oc-muted); }
+  .more { color: var(--oc-muted); padding: 2px 2px 4px; font-size: 11px; }
+  /* Stop is a text button: no fill, it only changes colour, and asks once before acting. */
+  .stop { flex: none; margin-left: auto; padding: 0 2px; border: 0; background: none; font: 11px var(--oc-font); color: var(--oc-muted); cursor: pointer; }
+  .stop:hover, .stop:focus-visible { color: var(--oc-error-text, var(--oc-error)); }
+  .stop.armed { color: var(--oc-error-text, var(--oc-error)); font-weight: 600; }
+  .stop:disabled { cursor: default; opacity: .6; }
+  .stop:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: 1px; border-radius: 3px; }
   .banner { padding: 8px 12px; border-radius: var(--oc-radius); border: 1px solid color-mix(in srgb, var(--oc-warning) 40%, transparent);
     background: color-mix(in srgb, var(--oc-warning) 10%, transparent); color: var(--oc-warning-text, var(--oc-fg)); }
   .banner.error { border-color: color-mix(in srgb, var(--oc-error) 40%, transparent); background: color-mix(in srgb, var(--oc-error) 10%, transparent);

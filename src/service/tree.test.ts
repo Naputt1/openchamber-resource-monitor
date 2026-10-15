@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RawProcess } from './parse.ts';
-import { buildTreeView, collectTree, describeProcess, GROUP_PROCESS_LIMIT } from './tree.ts';
+import { buildTreeView, collectTree, describeProcess, GROUP_PROCESS_LIMIT, jobTitle } from './tree.ts';
 
 const MB = 1024 * 1024;
 const proc = (pid: number, ppid: number, name: string, memoryMb = 10): RawProcess => ({ pid, ppid, name, memory: memoryMb * MB, cpuSeconds: 0 });
@@ -26,6 +26,7 @@ const processes: RawProcess[] = [
 ];
 
 const commands = new Map([
+  [201, '/bin/zsh -c npm run dev'],
   [200, '/Users/me/.opencode/bin/opencode serve --port 4096'],
   [202, 'node /repo/node_modules/.bin/vite --port 5173'],
   [301, 'node /repo/node_modules/next/dist/bin/next dev'],
@@ -48,11 +49,16 @@ describe('process tree', () => {
 
   test('groups the app, OpenCode with what agents started, and the terminal', () => {
     const { view: tree } = view();
-    expect(tree.groups.map((group) => [group.id, group.processes.map((row) => `${row.depth}:${row.pid}`)])).toEqual([
-      ['app', ['0:100', '1:101', '1:102', '1:400']],
-      ['opencode', ['0:200', '1:201', '2:202', '3:203']],
-      ['terminals', ['0:300', '1:301']],
+    // Own processes flat; what agents and the terminal started folds into jobs.
+    expect(tree.groups.map((group) => [group.id, group.processes.map((row) => row.pid), group.jobs.map((job) => job.pid)])).toEqual([
+      ['app', [100, 101, 102, 400], []],
+      ['opencode', [200], [201]],
+      ['terminals', [300], [301]],
     ]);
+    const agentJob = tree.groups[1]?.jobs[0];
+    expect(agentJob).toMatchObject({ title: 'zsh', count: 3, memory: 153 * MB, cpu: 5, ports: [5173] });
+    // The wrapper shell (3 MB, idle) isn't worth a row; vite (big) and esbuild (busy) are.
+    expect(agentJob?.members.map((row) => [row.pid, row.label])).toEqual([[202, 'vite'], [203, 'esbuild']]);
     const app = tree.groups[0];
     expect(app?.memory).toBe((300 + 500 + 80 + 30) * MB);
     expect(app?.processes.at(-1)?.name).toBe('Resource Monitor');
@@ -68,6 +74,8 @@ describe('process tree', () => {
     ]);
     expect(tree.servers[1]?.memory).toBe(150 * MB);
     expect(tree.servers[1]?.cpu).toBe(5);
+    // Stop on a dev server ends the job that started it, so a watcher can't bring it back.
+    expect(tree.servers.map((server) => server.job?.pid)).toEqual([301, 201]);
   });
 
   test('OpenCode outside the app is listed once with its children', () => {
@@ -101,8 +109,10 @@ describe('process tree', () => {
     const withAction = [...processes, { ...proc(600, 100, 'bun', 90), tty: 'ttys007' }, { ...proc(601, 600, 'node', 60), tty: 'ttys007' }];
     const members = collectTree(withAction, 100, 400);
     const tree = buildTreeView({ members, processes: withAction, rootPid: 100, selfPid: 400, cpu, commands: new Map([...commands, [601, 'node /site/node_modules/.bin/astro dev']]), ports: new Map([...ports, [601, [4321]]]) });
-    expect(tree.groups.find((group) => group.id === 'terminals')?.processes.map((row) => row.pid)).toEqual([600, 601, 300, 301]);
-    expect(tree.servers.map((server) => [server.ports, server.name])).toContainEqual([[4321], 'astro']);
+    const terminals = tree.groups.find((group) => group.id === 'terminals');
+    expect(terminals?.processes.map((row) => row.pid)).toEqual([300]);
+    expect(terminals?.jobs.map((job) => [job.pid, job.title, job.count])).toEqual([[301, 'node next dev', 1], [600, 'bun', 2]]);
+    expect(tree.servers.find((server) => server.ports[0] === 4321)).toMatchObject({ name: 'astro', job: { pid: 600 } });
   });
 
   test('a child sharing the app\'s own terminal is still the app (dev builds started from a shell)', () => {
@@ -125,12 +135,12 @@ describe('process tree', () => {
     expect(buildTreeView({ members, processes, rootPid: 12345, selfPid: 400, cpu, commands, ports }).groups).toEqual([]);
   });
 
-  test('a huge group is cut and says how many are hidden', () => {
+  test('a huge group is cut but still counts everything', () => {
     const many = [proc(1, 0, 'app'), proc(2, 1, 'opencode'), ...Array.from({ length: GROUP_PROCESS_LIMIT + 5 }, (_, index) => proc(10 + index, 2, 'mcp'))];
     const members = collectTree(many, 1, 999);
     const group = buildTreeView({ members, processes: many, rootPid: 1, selfPid: 999, cpu: new Map(), commands: new Map(), ports: new Map() }).groups[1];
-    expect(group?.processes).toHaveLength(GROUP_PROCESS_LIMIT);
-    expect(group?.hidden).toBe(6);
+    expect(group?.jobs).toHaveLength(GROUP_PROCESS_LIMIT);
+    expect(group?.count).toBe(GROUP_PROCESS_LIMIT + 6);
   });
 });
 
@@ -143,5 +153,15 @@ describe('describeProcess', () => {
     expect(describeProcess('Python', 'python3 -m http.server 8765')).toBe('http.server');
     expect(describeProcess('node', '')).toBe('node');
     expect(describeProcess('postgres', '/usr/bin/postgres -D data')).toBe('postgres');
+  });
+});
+
+describe('jobTitle', () => {
+  test('runtimes keep their arguments, other programs their name', () => {
+    expect(jobTitle('bun', 'bun run dev')).toBe('bun run dev');
+    expect(jobTitle('node', 'node /Users/me/site/scripts/dev-web-hmr.mjs')).toBe('node dev-web-hmr.mjs');
+    expect(jobTitle('node.exe', '"C:\\Program Files\\nodejs\\node.exe" server.js --port 3000')).toBe('node server.js --port 3000');
+    expect(jobTitle('claude', '/opt/claude --output-format stream-json --verbose')).toBe('claude');
+    expect(jobTitle('node', 'node a b c d e f g')).toBe('node a b c d …');
   });
 });

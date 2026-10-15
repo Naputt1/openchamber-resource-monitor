@@ -4,8 +4,55 @@ import http from "node:http";
 // src/service/sampler.ts
 import os from "node:os";
 
+// src/service/kill.ts
+import { execFile } from "node:child_process";
+var GRACE_MS = 3000;
+var POLL_MS = 150;
+var isAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM";
+  }
+};
+var taskkill = (pids, force) => new Promise((resolve) => {
+  const args = [...force ? ["/F"] : [], "/T", ...pids.flatMap((pid) => ["/PID", String(pid)])];
+  execFile("taskkill", args, { windowsHide: true, timeout: 1e4 }, () => resolve());
+});
+var signal = (pids, name) => {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, name);
+    } catch {}
+  }
+};
+var stopProcesses = async (pids) => {
+  if (pids.length === 0)
+    return [];
+  if (process.platform === "win32")
+    await taskkill(pids, false);
+  else
+    signal(pids, "SIGTERM");
+  const deadline = Date.now() + GRACE_MS;
+  while (Date.now() < deadline && pids.some(isAlive))
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  const left = pids.filter(isAlive);
+  if (left.length === 0)
+    return [];
+  if (process.platform === "win32")
+    await taskkill(left, true);
+  else
+    signal(left, "SIGKILL");
+  await new Promise((resolve) => setTimeout(resolve, POLL_MS * 2));
+  return left.filter(isAlive);
+};
+
 // src/service/tree.ts
 var GROUP_PROCESS_LIMIT = 60;
+var NOTABLE_CPU = 1;
+var NOTABLE_MEMORY = 40 * 1024 * 1024;
+var JOB_MEMBERS_MAX = 8;
 var COMMAND_MAX = 400;
 var normalizedName = (name) => name.replace(/^-/, "").replace(/\.exe$/i, "").toLowerCase();
 var isOpenCodeName = (name) => /^opencode(-cli)?$/.test(normalizedName(name));
@@ -70,6 +117,59 @@ var classifyBranches = (members, commands) => {
   }
   return groups;
 };
+var groupResolver = (members, commands) => {
+  const branches = classifyBranches(members, commands);
+  return (member) => member.depth === 0 ? "app" : branches.get(member.branch) ?? "app";
+};
+var isOpenCodeServer = (member, group, commands) => group === "opencode" && isOpenCodeName(member.process.name) && (member.depth === 1 || servesOpenCode(member.process.name, commands.get(member.process.pid) ?? ""));
+var subtreePids = (members, pid) => {
+  const pids = [];
+  const seen = new Set;
+  const stack = [pid];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === undefined || seen.has(current) || !members.has(current))
+      continue;
+    seen.add(current);
+    pids.push(current);
+    for (const member of members.values())
+      if (member.process.ppid === current && member.process.pid !== current)
+        stack.push(member.process.pid);
+  }
+  return pids;
+};
+var findJobTops = (members, commands, groupOf = groupResolver(members, commands)) => {
+  const tops = new Map;
+  const openCodeServers = new Set([...members.values()].filter((member) => isOpenCodeServer(member, groupOf(member), commands)).map((member) => member.process.pid));
+  const isTerminalShell = (member) => member !== undefined && member.depth === 1 && isShellName(member.process.name) && groupOf(member) === "terminals";
+  for (const member of members.values()) {
+    const group = groupOf(member);
+    const { pid, ppid, name } = member.process;
+    if (group === "opencode" && openCodeServers.has(ppid))
+      tops.set(pid, group);
+    if (group !== "terminals")
+      continue;
+    if (member.depth === 1 && !isShellName(name))
+      tops.set(pid, group);
+    if (isTerminalShell(members.get(ppid)))
+      tops.set(pid, group);
+  }
+  return tops;
+};
+var jobTitle = (name, command) => {
+  const base = normalizedName(name);
+  if (!RUNTIMES.has(base))
+    return name.replace(/\.exe$/i, "");
+  const tokens = command.replace(/^"([^"]+)"/, (_, path) => path.replace(/\s/g, "\x00")).trim().split(/\s+/);
+  if (tokens.length === 0 || !tokens[0])
+    return name.replace(/\.exe$/i, "");
+  const words = tokens.slice(0, 5).map((token, index) => {
+    const plain = token.replace(/\u0000/g, " ");
+    const file = plain.replace(/^.*[\\/]/, "");
+    return index === 0 ? file.replace(/\.exe$/i, "") : file;
+  });
+  return `${words.join(" ")}${tokens.length > 5 ? " …" : ""}`;
+};
 var RUNTIMES = new Set(["node", "bun", "deno", "python", "python3", "ruby", "php", "java", "npm", "pnpm", "yarn", "npx", "bunx", "uv", "go", "cargo", "dotnet"]);
 var describeProcess = (name, command) => {
   const base = normalizedName(name);
@@ -91,18 +191,17 @@ var describeProcess = (name, command) => {
 var trimCommand = (command) => command.length > COMMAND_MAX ? `${command.slice(0, COMMAND_MAX - 1)}…` : command;
 var GROUP_ORDER = ["app", "opencode", "terminals"];
 var buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, ports }) => {
-  const branches = classifyBranches(members, commands);
-  const groupOf = (member) => member.depth === 0 ? "app" : branches.get(member.branch) ?? "app";
+  const groupOf = groupResolver(members, commands);
   const children = childrenOf(processes);
   const byPid = new Map(processes.map((process2) => [process2.pid, process2]));
-  const row = (process2, depth) => ({
+  const row = (process2) => ({
     pid: process2.pid,
     ppid: process2.ppid,
     name: process2.pid === selfPid ? "Resource Monitor" : process2.name.replace(/\.exe$/i, ""),
+    label: process2.pid === selfPid ? "Resource Monitor" : describeProcess(process2.name, commands.get(process2.pid) ?? ""),
     command: process2.pid === selfPid ? "" : trimCommand(commands.get(process2.pid) ?? ""),
     cpu: cpu.get(process2.pid) ?? null,
     memory: process2.memory,
-    depth,
     ports: process2.pid === selfPid ? [] : [...ports.get(process2.pid) ?? []].sort((a, b) => a - b)
   });
   const subtree = (pid, inTree) => {
@@ -125,34 +224,47 @@ var buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, port
     }
     return total;
   };
+  const jobTops = findJobTops(members, commands, groupOf);
+  const jobOf = new Map;
+  for (const top of jobTops.keys())
+    for (const pid of subtreePids(members, top))
+      jobOf.set(pid, top);
+  const job = (top) => {
+    const rows = subtreePids(members, top.process.pid).flatMap((pid) => {
+      const member = members.get(pid);
+      return member ? [row(member.process)] : [];
+    });
+    const command = commands.get(top.process.pid) ?? "";
+    const notable = rows.filter((entry) => (entry.cpu ?? 0) >= NOTABLE_CPU || entry.memory >= NOTABLE_MEMORY || entry.ports.length > 0).sort((a, b) => b.memory - a.memory);
+    return {
+      pid: top.process.pid,
+      name: top.process.name.replace(/\.exe$/i, ""),
+      title: jobTitle(top.process.name, command),
+      command: trimCommand(command),
+      cpu: rows.reduce((sum, entry) => sum + (entry.cpu ?? 0), 0),
+      memory: rows.reduce((sum, entry) => sum + entry.memory, 0),
+      ports: [...new Set(rows.flatMap((entry) => entry.ports))].sort((a, b) => a - b),
+      count: rows.length,
+      members: notable.slice(0, JOB_MEMBERS_MAX)
+    };
+  };
   const groups = [];
   for (const id of GROUP_ORDER) {
     const inGroup = [...members.values()].filter((member) => groupOf(member) === id);
     if (inGroup.length === 0)
       continue;
-    const tops = inGroup.filter((member) => id === "app" ? member.depth === 0 : member.depth === 1).sort((a, b) => b.process.memory - a.process.memory);
-    const ordered = [];
-    const visit = (member, depth) => {
-      ordered.push(row(member.process, depth));
-      if (member.process.pid === selfPid)
-        return;
-      const kids = (children.get(member.process.pid) ?? []).map((child) => members.get(child.pid)).filter((child) => child !== undefined && groupOf(child) === id).sort((a, b) => b.process.memory - a.process.memory);
-      for (const kid of kids)
-        visit(kid, depth + 1);
-    };
-    for (const top of tops)
-      visit(top, 0);
-    const totalCpu = inGroup.reduce((sum, member) => sum + (cpu.get(member.process.pid) ?? 0), 0);
-    const totalMemory = inGroup.reduce((sum, member) => sum + member.process.memory, 0);
+    const own = inGroup.filter((member) => !jobOf.has(member.process.pid)).sort((a, b) => a.depth - b.depth || b.process.memory - a.process.memory).map((member) => row(member.process));
+    const jobs = inGroup.filter((member) => jobTops.has(member.process.pid)).map(job).sort((a, b) => b.memory - a.memory);
     groups.push({
       id,
-      cpu: totalCpu,
-      memory: totalMemory,
-      processes: ordered.slice(0, GROUP_PROCESS_LIMIT),
-      hidden: Math.max(0, ordered.length - GROUP_PROCESS_LIMIT)
+      cpu: inGroup.reduce((sum, member) => sum + (cpu.get(member.process.pid) ?? 0), 0),
+      memory: inGroup.reduce((sum, member) => sum + member.process.memory, 0),
+      count: inGroup.length,
+      processes: own.slice(0, GROUP_PROCESS_LIMIT),
+      jobs: jobs.slice(0, GROUP_PROCESS_LIMIT)
     });
   }
-  const openCodeServers = new Set([...members.values()].filter((member) => isOpenCodeName(member.process.name) && groupOf(member) === "opencode" && (member.depth === 1 || servesOpenCode(member.process.name, commands.get(member.process.pid) ?? ""))).map((member) => member.process.pid));
+  const openCodeServers = new Set([...members.values()].filter((member) => isOpenCodeServer(member, groupOf(member), commands)).map((member) => member.process.pid));
   const servers = [];
   for (const member of members.values()) {
     const listening = ports.get(member.process.pid);
@@ -160,6 +272,7 @@ var buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, port
     if (!listening?.length || groupOf(member) === "app" || openCodeServers.has(pid))
       continue;
     const command = commands.get(pid) ?? "";
+    const jobTop = members.get(jobOf.get(pid) ?? -1);
     servers.push({
       pid,
       name: describeProcess(name, command),
@@ -167,11 +280,12 @@ var buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, port
       command: trimCommand(command),
       ports: [...listening].sort((a, b) => a - b),
       group: groupOf(member),
-      ...subtree(pid, true)
+      ...subtree(pid, true),
+      job: jobTop ? { pid: jobTop.process.pid, name: jobTop.process.name.replace(/\.exe$/i, ""), title: jobTitle(jobTop.process.name, commands.get(jobTop.process.pid) ?? "") } : null
     });
   }
   servers.sort((a, b) => (a.ports[0] ?? 0) - (b.ports[0] ?? 0));
-  const outside = processes.filter((process2) => !members.has(process2.pid) && isOpenCodeName(process2.name)).filter((process2) => !isOpenCodeName(byPid.get(process2.ppid)?.name ?? "")).map((process2) => ({ ...row(process2, 0), ...subtree(process2.pid, false) })).sort((a, b) => b.memory - a.memory);
+  const outside = processes.filter((process2) => !members.has(process2.pid) && isOpenCodeName(process2.name)).filter((process2) => !isOpenCodeName(byPid.get(process2.ppid)?.name ?? "")).map((process2) => ({ ...row(process2), ...subtree(process2.pid, false) })).sort((a, b) => b.memory - a.memory);
   const total = subtree(rootPid, true);
   return {
     rootName: members.get(rootPid)?.process.name.replace(/\.exe$/i, "") ?? "OpenChamber",
@@ -181,6 +295,34 @@ var buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, port
     servers,
     outside
   };
+};
+
+// src/service/stop.ts
+var parseStopTarget = (value) => {
+  if (typeof value !== "object" || value === null)
+    return null;
+  const kind = Reflect.get(value, "kind");
+  if (kind === "terminals")
+    return { kind };
+  const pid = Reflect.get(value, "pid");
+  const name = Reflect.get(value, "name");
+  if (kind === "job" && Number.isInteger(pid) && pid > 0 && typeof name === "string" && name)
+    return { kind, pid, name };
+  return null;
+};
+var planStop = (members, commands, target) => {
+  const tops = findJobTops(members, commands);
+  if (target.kind === "job") {
+    const member = members.get(target.pid);
+    const group = tops.get(target.pid);
+    if (!member || !group)
+      return null;
+    if (member.process.name.replace(/\.exe$/i, "") !== target.name.replace(/\.exe$/i, ""))
+      return null;
+    return { pids: subtreePids(members, target.pid), needsPort: group === "opencode" };
+  }
+  const pids = [...tops].filter(([, group]) => group === "terminals").flatMap(([pid]) => subtreePids(members, pid));
+  return { pids, needsPort: false };
 };
 
 // src/shared/snapshot.ts
@@ -292,6 +434,19 @@ class Sampler {
     }
     return this.portsCache;
   }
+  async stop(target) {
+    const processes = await this.source.list();
+    const members = collectTree(processes, this.rootPid, this.selfPid);
+    const commands = await this.commandsFor(processes, [...members.keys()]);
+    const plan = planStop(members, commands, target);
+    if (plan === null)
+      return null;
+    const { pids } = plan;
+    if (plan.needsPort && (await this.source.ports(pids)).size === 0)
+      return null;
+    const survived = await stopProcesses(pids);
+    return { stopped: pids.length - survived.length, survived: survived.length };
+  }
   async sample() {
     this.samples += 1;
     const warnings = [];
@@ -365,7 +520,7 @@ class Sampler {
 }
 
 // src/service/sources.ts
-import { execFile, spawn } from "node:child_process";
+import { execFile as execFile2, spawn } from "node:child_process";
 import { readdir, readFile, readlink } from "node:fs/promises";
 import os2 from "node:os";
 
@@ -556,7 +711,7 @@ var parseWindowsCommands = (stdout) => {
 
 // src/service/sources.ts
 var run = (file, args, okExitCodes = [0]) => new Promise((resolve, reject) => {
-  execFile(file, args, { timeout: 1e4, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
+  execFile2(file, args, { timeout: 1e4, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
     const code = error && "code" in error && typeof error.code === "number" ? error.code : error ? -1 : 0;
     if (!error || okExitCodes.includes(code))
       resolve(stdout);
@@ -859,6 +1014,26 @@ var server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (url.pathname === "/health") {
     json(res, 200, { ok: true });
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/stop") {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString("utf8");
+    });
+    req.on("end", () => {
+      let target;
+      try {
+        target = parseStopTarget(JSON.parse(body));
+      } catch {
+        target = null;
+      }
+      if (!target) {
+        json(res, 400, { error: "bad-request" });
+        return;
+      }
+      sampler.stop(target).then((result) => result ? json(res, 200, result) : json(res, 404, { error: "not-stoppable" }), () => json(res, 500, { error: "stop-failed" }));
+    });
     return;
   }
   if (req.method !== "GET" || url.pathname !== "/snapshot") {

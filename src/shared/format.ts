@@ -90,7 +90,7 @@ export const processLabel = (row: ProcessRow, role: 'root' | 'self' | 'other'): 
     const service = UTILITY_SERVICES.find(([pattern]) => pattern.test(subType))?.[1];
     return { title: service ?? HELPER_TYPES[type] ?? type, detail: ports };
   }
-  return { title: row.name, detail: join(ports, commandArguments(row.name, row.command)) };
+  return { title: row.label || row.name, detail: join(ports, commandArguments(row.name, row.command)) };
 };
 
 export const platformName = (platform: string): string => {

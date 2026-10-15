@@ -37,6 +37,18 @@ const failureOf = (error: unknown): PollFailure => {
   return 'unreachable';
 };
 
+export type StopRequest = { kind: 'job'; pid: number; name: string } | { kind: 'terminals' };
+
+/** Asks the service to stop a job or everything in the terminal; true when it did. */
+export const requestStop = async (host: HostClient, target: StopRequest): Promise<boolean> => {
+  try {
+    const result = await host.serviceRequest({ method: 'POST', path: '/stop', body: JSON.stringify(target) });
+    return result.status === 200;
+  } catch {
+    return false;
+  }
+};
+
 export const isOnScreen = (root: HTMLElement): boolean => !document.hidden && root.getBoundingClientRect().width > 0;
 
 export const startPolling = (
@@ -44,7 +56,7 @@ export const startPolling = (
   root: HTMLElement,
   onSnapshot: (snapshot: Snapshot) => void,
   onFailure: (failure: PollFailure) => void,
-): void => {
+): { refresh: () => void } => {
   let inflight = false;
   const poll = async (): Promise<void> => {
     if (inflight || !isOnScreen(root)) return;
@@ -77,4 +89,5 @@ export const startPolling = (
   };
   document.addEventListener('visibilitychange', onVisibility);
   new ResizeObserver(onVisibility).observe(document.documentElement);
+  return { refresh: () => { void poll(); } };
 };
