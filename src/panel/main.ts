@@ -192,7 +192,7 @@ const renderStack = (target: HTMLElement, parts: { value: number; color: string;
 };
 
 const WARNING_TEXT = {
-  'processes-unavailable': 'The process list could not be read on this machine, so only system totals are shown.',
+  'processes-unavailable': 'The process list could not be read just now. OpenChamber\'s numbers are from the last reading that worked.',
   'ports-unavailable': 'Listening ports could not be read, so dev servers are not detected.',
 } as const;
 

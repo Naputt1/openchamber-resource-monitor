@@ -165,8 +165,9 @@ while ($true) {
   if ($null -eq $request) { break }
   $lines = @()
   if ($request -eq 'list') {
-    $lines = foreach ($p in Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,KernelModeTime,UserModeTime,Name) {
-      "$($p.ProcessId)\`t$($p.ParentProcessId)\`t$($p.WorkingSetSize)\`t$([uint64]$p.KernelModeTime + [uint64]$p.UserModeTime)\`t$($p.Name)"
+    $lines = foreach ($p in Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,KernelModeTime,UserModeTime,CreationDate,Name) {
+      $started = if ($p.CreationDate) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() } else { '' }
+      "$($p.ProcessId)\`t$($p.ParentProcessId)\`t$($p.WorkingSetSize)\`t$([uint64]$p.KernelModeTime + [uint64]$p.UserModeTime)\`t$started\`t$($p.Name)"
     }
   } elseif ($request.StartsWith('commands ')) {
     $ids = $request.Substring(9).Split(',') | Where-Object { $_ -match '^[0-9]+$' }

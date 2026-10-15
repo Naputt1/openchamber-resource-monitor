@@ -50,6 +50,11 @@ export const collectTree = (processes: readonly RawProcess[], rootPid: number, s
     members.set(member.process.pid, member);
     if (member.process.pid === selfPid) continue;
     for (const child of children.get(member.process.pid) ?? []) {
+      // Windows keeps a dead parent's pid on its children and reuses pids, so a
+      // process older than its "parent" belongs to someone else.
+      const { startedAt: childStart } = child;
+      const { startedAt: parentStart } = member.process;
+      if (childStart !== undefined && parentStart !== undefined && childStart < parentStart) continue;
       stack.push({ process: child, depth: member.depth + 1, branch: member.depth === 0 ? child.pid : member.branch });
     }
   }
@@ -194,11 +199,14 @@ export const buildTreeView = ({ members, processes, rootPid, selfPid, cpu, comma
     .filter((member) => isOpenCodeName(member.process.name) && groupOf(member) === 'opencode'
       && (member.depth === 1 || servesOpenCode(member.process.name, commands.get(member.process.pid) ?? '')))
     .map((member) => member.process.pid));
+  // Dev servers are what agents and the terminal started. The app's own children
+  // (other extensions' services, tunnel helpers) listen on ports too, but they are
+  // OpenChamber's plumbing and stay in its process list.
   const servers: DevServer[] = [];
   for (const member of members.values()) {
     const listening = ports.get(member.process.pid);
     const { pid, name } = member.process;
-    if (!listening?.length || pid === rootPid || pid === selfPid || openCodeServers.has(pid)) continue;
+    if (!listening?.length || groupOf(member) === 'app' || openCodeServers.has(pid)) continue;
     const command = commands.get(pid) ?? '';
     servers.push({
       pid,

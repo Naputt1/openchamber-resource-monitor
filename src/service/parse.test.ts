@@ -102,9 +102,9 @@ describe('Windows', () => {
   });
 
   test('helper process list and command lines', () => {
-    expect(parseWindowsList('4\t0\t1048576\t20000000\tSystem\r\n8120\t4\t2097152\t5000000\tnode.exe\r\n')).toEqual([
+    expect(parseWindowsList('4\t0\t1048576\t20000000\t\tSystem\r\n8120\t4\t2097152\t5000000\t1792070000000\tnode.exe\r\n')).toEqual([
       { pid: 4, ppid: 0, name: 'System', memory: 1048576, cpuSeconds: 2 },
-      { pid: 8120, ppid: 4, name: 'node.exe', memory: 2097152, cpuSeconds: 0.5 },
+      { pid: 8120, ppid: 4, name: 'node.exe', memory: 2097152, cpuSeconds: 0.5, startedAt: 1792070000000 },
     ]);
     expect(parseWindowsCommands('8120\t"C:\\node.exe" vite\r\n9\t\r\n')).toEqual(new Map([[8120, '"C:\\node.exe" vite'], [9, '']]));
   });

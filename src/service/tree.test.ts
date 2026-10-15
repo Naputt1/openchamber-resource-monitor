@@ -87,6 +87,22 @@ describe('process tree', () => {
     expect(tree.rootName).toBe('OpenChamber');
   });
 
+  test('the app\'s own listening children are not dev servers', () => {
+    // Another extension's service: a direct child of the app, on a loopback port.
+    const withService = [...processes, proc(500, 100, 'OpenChamber', 40)];
+    const members = collectTree(withService, 100, 400);
+    const tree = buildTreeView({ members, processes: withService, rootPid: 100, selfPid: 400, cpu, commands, ports: new Map([...ports, [500, [54321]]]) });
+    expect(tree.servers.map((server) => server.pid)).toEqual([301, 202]);
+    expect(tree.groups[0]?.processes.some((row) => row.pid === 500 && row.ports.includes(54321))).toBe(true);
+  });
+
+  test('on Windows a process older than its recorded parent is not its child', () => {
+    const start = (row: RawProcess, startedAt: number): RawProcess => ({ ...row, startedAt });
+    // pid 10 was reused by the app after the old parent of 30 died.
+    const windows = [start(proc(10, 1, 'OpenChamber.exe'), 2_000), start(proc(20, 10, 'opencode.exe'), 3_000), start(proc(30, 10, 'sqlservr.exe'), 1_000)];
+    expect([...collectTree(windows, 10, 99).keys()].sort((a, b) => a - b)).toEqual([10, 20]);
+  });
+
   test('a missing root yields an empty view, not a crash', () => {
     const members = collectTree(processes, 12345, 400);
     expect(members.size).toBe(0);

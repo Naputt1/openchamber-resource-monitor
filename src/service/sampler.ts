@@ -4,7 +4,7 @@ import os from 'node:os';
 
 import type { RawProcess } from './parse.ts';
 import type { ProcessSource } from './sources.ts';
-import { buildTreeView, collectTree, isOpenCodeName } from './tree.ts';
+import { buildTreeView, collectTree, isOpenCodeName, type TreeView } from './tree.ts';
 import { HISTORY_POINTS, type Percent, type Snapshot, type SystemStats, type Warning } from '../shared/snapshot.ts';
 
 export const SAMPLE_INTERVAL_MS = 2_000;
@@ -33,6 +33,8 @@ export class Sampler {
   private portsCache = new Map<number, number[]>();
   private portsWarning = false;
   private samples = 0;
+  /** The last tree read that worked, shown again while the process list can't be read. */
+  private lastView: TreeView | null = null;
   private history = { system: { cpu: [] as number[], memory: [] as number[] }, app: { cpu: [] as number[], memory: [] as number[] } };
 
   constructor(
@@ -47,6 +49,7 @@ export class Sampler {
     this.previousCpu.clear();
     this.previousAt = 0;
     this.samples = 0;
+    this.lastView = null;
     this.history = { system: { cpu: [], memory: [] }, app: { cpu: [], memory: [] } };
   }
 
@@ -134,20 +137,30 @@ export class Sampler {
       memoryUsed = os.totalmem() - os.freemem();
     }
 
-    let processes: RawProcess[] = [];
+    let processes: RawProcess[] | null = null;
     try {
       processes = await this.source.list();
     } catch {
       warnings.push('processes-unavailable');
     }
-    const cpu = this.processCpu(processes, at, cores);
-    const members = collectTree(processes, this.rootPid, this.selfPid);
-    const outsideCandidates = processes.filter((process) => !members.has(process.pid) && isOpenCodeName(process.name));
-    const detailPids = [...members.keys(), ...outsideCandidates.map((process) => process.pid)];
-    const commands = await this.commandsFor(processes, detailPids);
-    const ports = members.size > 0 ? await this.portsFor([...members.keys()]) : new Map<number, number[]>();
-    if (this.portsWarning) warnings.push('ports-unavailable');
-    const view = buildTreeView({ members, processes, rootPid: this.rootPid, selfPid: this.selfPid, cpu, commands, ports });
+    let view: TreeView;
+    if (processes) {
+      // CPU times are as of the moment the list came back, which on Windows can be
+      // seconds after `at`; measuring from `at` would spread them over too long a time.
+      const cpu = this.processCpu(processes, Date.now(), cores);
+      const members = collectTree(processes, this.rootPid, this.selfPid);
+      const outsideCandidates = processes.filter((process) => !members.has(process.pid) && isOpenCodeName(process.name));
+      const detailPids = [...members.keys(), ...outsideCandidates.map((process) => process.pid)];
+      const commands = await this.commandsFor(processes, detailPids);
+      const ports = members.size > 0 ? await this.portsFor([...members.keys()]) : new Map<number, number[]>();
+      if (this.portsWarning) warnings.push('ports-unavailable');
+      view = buildTreeView({ members, processes, rootPid: this.rootPid, selfPid: this.selfPid, cpu, commands, ports });
+      this.lastView = view;
+    } else {
+      // A failed read is not "OpenChamber uses nothing": keep the last view and
+      // the previous CPU times, so neither the chart nor the next reading drops to zero.
+      view = this.lastView ?? { rootName: 'OpenChamber', cpu: 0, memory: 0, groups: [], servers: [], outside: [] };
+    }
 
     const load = os.loadavg();
     const firstCpu = os.cpus()[0];
@@ -170,8 +183,10 @@ export class Sampler {
     if (systemCpu !== null) {
       push(this.history.system.cpu, systemCpu);
       push(this.history.system.memory, memoryUsed);
-      push(this.history.app.cpu, view.cpu);
-      push(this.history.app.memory, view.memory);
+      if (processes) {
+        push(this.history.app.cpu, view.cpu);
+        push(this.history.app.memory, view.memory);
+      }
     }
 
     return {

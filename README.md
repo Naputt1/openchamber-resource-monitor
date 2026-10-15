@@ -14,9 +14,9 @@ Web and desktop, on macOS, Linux and Windows. The phone app and VS Code don't lo
 
 ## How it finds OpenChamber's processes
 
-OpenChamber starts the extension's service itself, so the service's parent process is the app: the Electron main process on desktop, the server for `openchamber serve`. Everything under that process is OpenChamber's. OpenCode is the `opencode` child, and the shells under it belong to agents. Other shells under the app are the built-in terminal. A process in that tree that listens on a TCP port is a dev server, except the app's and OpenCode's own servers.
+OpenChamber starts the extension's service itself, so the service's parent process is the app: the Electron main process on desktop, the server for `openchamber serve`. Everything under that process is OpenChamber's. OpenCode is the `opencode` child, and the shells under it belong to agents. Other shells under the app are the built-in terminal. A process under OpenCode or the terminal that listens on a TCP port is a dev server; OpenCode's own server isn't. The app's other children, such as other extensions' services, listen on ports too and stay in its process list.
 
-Some processes leave the tree. A server that daemonizes itself, or a container started with `docker compose up -d`, belongs to another parent and isn't shown. OpenCode started outside OpenChamber, such as a TUI in another terminal, is listed separately.
+Some processes leave the tree. A server that daemonizes itself, or a container started with `docker compose up -d`, belongs to another parent and isn't shown. OpenCode started outside OpenChamber, such as a TUI in another terminal or an external OpenCode server you connected to, is listed separately, and the dev servers its agents start aren't detected.
 
 When the connected OpenChamber runs on another machine, the monitor shows that machine, where OpenCode and its dev servers actually run.
 

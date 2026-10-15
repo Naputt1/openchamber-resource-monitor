@@ -38,6 +38,10 @@ var collectTree = (processes, rootPid, selfPid) => {
     if (member.process.pid === selfPid)
       continue;
     for (const child of children.get(member.process.pid) ?? []) {
+      const { startedAt: childStart } = child;
+      const { startedAt: parentStart } = member.process;
+      if (childStart !== undefined && parentStart !== undefined && childStart < parentStart)
+        continue;
       stack.push({ process: child, depth: member.depth + 1, branch: member.depth === 0 ? child.pid : member.branch });
     }
   }
@@ -149,7 +153,7 @@ var buildTreeView = ({ members, processes, rootPid, selfPid, cpu, commands, port
   for (const member of members.values()) {
     const listening = ports.get(member.process.pid);
     const { pid, name } = member.process;
-    if (!listening?.length || pid === rootPid || pid === selfPid || openCodeServers.has(pid))
+    if (!listening?.length || groupOf(member) === "app" || openCodeServers.has(pid))
       continue;
     const command = commands.get(pid) ?? "";
     servers.push({
@@ -203,6 +207,7 @@ class Sampler {
   portsCache = new Map;
   portsWarning = false;
   samples = 0;
+  lastView = null;
   history = { system: { cpu: [], memory: [] }, app: { cpu: [], memory: [] } };
   constructor(source, rootPid, selfPid) {
     this.source = source;
@@ -214,6 +219,7 @@ class Sampler {
     this.previousCpu.clear();
     this.previousAt = 0;
     this.samples = 0;
+    this.lastView = null;
     this.history = { system: { cpu: [], memory: [] }, app: { cpu: [], memory: [] } };
   }
   systemCpu() {
@@ -297,21 +303,27 @@ class Sampler {
     } catch {
       memoryUsed = os.totalmem() - os.freemem();
     }
-    let processes = [];
+    let processes = null;
     try {
       processes = await this.source.list();
     } catch {
       warnings.push("processes-unavailable");
     }
-    const cpu = this.processCpu(processes, at, cores);
-    const members = collectTree(processes, this.rootPid, this.selfPid);
-    const outsideCandidates = processes.filter((process2) => !members.has(process2.pid) && isOpenCodeName(process2.name));
-    const detailPids = [...members.keys(), ...outsideCandidates.map((process2) => process2.pid)];
-    const commands = await this.commandsFor(processes, detailPids);
-    const ports = members.size > 0 ? await this.portsFor([...members.keys()]) : new Map;
-    if (this.portsWarning)
-      warnings.push("ports-unavailable");
-    const view = buildTreeView({ members, processes, rootPid: this.rootPid, selfPid: this.selfPid, cpu, commands, ports });
+    let view;
+    if (processes) {
+      const cpu = this.processCpu(processes, Date.now(), cores);
+      const members = collectTree(processes, this.rootPid, this.selfPid);
+      const outsideCandidates = processes.filter((process2) => !members.has(process2.pid) && isOpenCodeName(process2.name));
+      const detailPids = [...members.keys(), ...outsideCandidates.map((process2) => process2.pid)];
+      const commands = await this.commandsFor(processes, detailPids);
+      const ports = members.size > 0 ? await this.portsFor([...members.keys()]) : new Map;
+      if (this.portsWarning)
+        warnings.push("ports-unavailable");
+      view = buildTreeView({ members, processes, rootPid: this.rootPid, selfPid: this.selfPid, cpu, commands, ports });
+      this.lastView = view;
+    } else {
+      view = this.lastView ?? { rootName: "OpenChamber", cpu: 0, memory: 0, groups: [], servers: [], outside: [] };
+    }
     const load = os.loadavg();
     const firstCpu = os.cpus()[0];
     const system = {
@@ -331,8 +343,10 @@ class Sampler {
     if (systemCpu !== null) {
       push(this.history.system.cpu, systemCpu);
       push(this.history.system.memory, memoryUsed);
-      push(this.history.app.cpu, view.cpu);
-      push(this.history.app.memory, view.memory);
+      if (processes) {
+        push(this.history.app.cpu, view.cpu);
+        push(this.history.app.memory, view.memory);
+      }
     }
     return {
       at,
@@ -504,19 +518,21 @@ var parseNetstatListen = (stdout) => {
 var parseWindowsList = (stdout) => {
   const rows = [];
   for (const line of stdout.split(/\r?\n/)) {
-    const [pid, ppid, memory, cpu, ...name] = line.split("\t");
+    const [pid, ppid, memory, cpu, started, ...name] = line.split("\t");
     const parsedPid = toInt(pid);
     const parsedPpid = toInt(ppid);
     if (!Number.isFinite(parsedPid) || !Number.isFinite(parsedPpid))
       continue;
     const bytes = Number(memory);
     const ticks = Number(cpu);
+    const startedAt = Number.parseInt(started ?? "", 10);
     rows.push({
       pid: parsedPid,
       ppid: parsedPpid,
       name: name.join("\t").trim(),
       memory: Number.isFinite(bytes) ? bytes : 0,
-      cpuSeconds: Number.isFinite(ticks) ? ticks / 1e7 : 0
+      cpuSeconds: Number.isFinite(ticks) ? ticks / 1e7 : 0,
+      ...Number.isFinite(startedAt) ? { startedAt } : {}
     });
   }
   return rows;
@@ -659,8 +675,9 @@ while ($true) {
   if ($null -eq $request) { break }
   $lines = @()
   if ($request -eq 'list') {
-    $lines = foreach ($p in Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,KernelModeTime,UserModeTime,Name) {
-      "$($p.ProcessId)\`t$($p.ParentProcessId)\`t$($p.WorkingSetSize)\`t$([uint64]$p.KernelModeTime + [uint64]$p.UserModeTime)\`t$($p.Name)"
+    $lines = foreach ($p in Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,KernelModeTime,UserModeTime,CreationDate,Name) {
+      $started = if ($p.CreationDate) { ([DateTimeOffset]$p.CreationDate).ToUnixTimeMilliseconds() } else { '' }
+      "$($p.ProcessId)\`t$($p.ParentProcessId)\`t$($p.WorkingSetSize)\`t$([uint64]$p.KernelModeTime + [uint64]$p.UserModeTime)\`t$started\`t$($p.Name)"
     }
   } elseif ($request.StartsWith('commands ')) {
     $ids = $request.Substring(9).Split(',') | Where-Object { $_ -match '^[0-9]+$' }

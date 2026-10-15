@@ -9,6 +9,8 @@ export interface RawProcess {
   memory: number;
   /** User plus system CPU time since the process started, in seconds. */
   cpuSeconds: number;
+  /** Start time in ms since the epoch, where the OS reuses parent pids (Windows). */
+  startedAt?: number;
 }
 
 const toInt = (value: string | undefined): number => {
@@ -176,23 +178,26 @@ export const parseNetstatListen = (stdout: string): Map<number, number[]> => {
 
 /**
  * One block from the Windows PowerShell helper: tab-separated
- * pid, ppid, working set bytes, CPU time in 100 ns units, name.
+ * pid, ppid, working set bytes, CPU time in 100 ns units, start time in
+ * ms since the epoch (empty when Windows doesn't say), name.
  */
 export const parseWindowsList = (stdout: string): RawProcess[] => {
   const rows: RawProcess[] = [];
   for (const line of stdout.split(/\r?\n/)) {
-    const [pid, ppid, memory, cpu, ...name] = line.split('\t');
+    const [pid, ppid, memory, cpu, started, ...name] = line.split('\t');
     const parsedPid = toInt(pid);
     const parsedPpid = toInt(ppid);
     if (!Number.isFinite(parsedPid) || !Number.isFinite(parsedPpid)) continue;
     const bytes = Number(memory);
     const ticks = Number(cpu);
+    const startedAt = Number.parseInt(started ?? '', 10);
     rows.push({
       pid: parsedPid,
       ppid: parsedPpid,
       name: name.join('\t').trim(),
       memory: Number.isFinite(bytes) ? bytes : 0,
       cpuSeconds: Number.isFinite(ticks) ? ticks / 1e7 : 0,
+      ...(Number.isFinite(startedAt) ? { startedAt } : {}),
     });
   }
   return rows;

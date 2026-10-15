@@ -44,8 +44,13 @@ for (const line of [appLine, cpuLine, memoryLine]) line.hidden = true;
 
 const render = (snapshot: Snapshot): void => {
   const { system, app } = snapshot;
-  note.hidden = true;
-  for (const line of [appLine, cpuLine, memoryLine]) line.hidden = false;
+  // Without the process list the OpenChamber line would show a stale number as live.
+  const processesMissing = snapshot.warnings.includes('processes-unavailable');
+  note.hidden = !processesMissing;
+  note.className = 'note error';
+  note.textContent = processesMissing ? 'Could not read the process list; showing system totals only.' : '';
+  for (const line of [cpuLine, memoryLine]) line.hidden = false;
+  appLine.hidden = processesMissing;
   appValue.textContent = `${formatBytes(app.memory)} · ${formatPercent(app.cpu)}`;
   appValue.title = 'Memory and CPU of OpenChamber, OpenCode, and everything they started';
   appChart.update(snapshot.history.app.memory, Math.max(app.memory, ...snapshot.history.app.memory) * 1.15);
@@ -54,7 +59,7 @@ const render = (snapshot: Snapshot): void => {
   memoryMeter.set((system.memoryUsed / Math.max(1, system.memoryTotal)) * 100);
   memoryValue.textContent = `${formatBytes(system.memoryUsed)} / ${formatBytes(system.memoryTotal)}`;
   const listening = [...new Set(snapshot.servers.flatMap((server) => server.ports))].sort((a, b) => a - b);
-  serversLine.hidden = listening.length === 0;
+  serversLine.hidden = listening.length === 0 || processesMissing;
   ports.replaceChildren(...listening.slice(0, 6).map((port) => el('span', 'port', `:${port}`)));
   serversValue.textContent = listening.length > 6 ? `+${listening.length - 6}` : '';
 };
