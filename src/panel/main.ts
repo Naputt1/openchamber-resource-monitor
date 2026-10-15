@@ -209,11 +209,13 @@ const groupBlock = (group: ProcessGroup, roleOf: (row: ProcessRow) => 'root' | '
   // Terminal jobs can be stopped; an agent's job only while it serves a port,
   // since OpenCode's provider CLIs and MCP servers are jobs too.
   const stoppable = (job: Job): boolean => group.id === 'terminals' || (group.id === 'opencode' && job.ports.length > 0);
-  return el('div', 'group', '', [
+  const block = el('div', 'group', '', [
     header,
     ...group.processes.map((process) => processRow(process, roleOf(process))),
     ...group.jobs.map((job) => jobRow(job, stoppable(job))),
   ]);
+  block.style.setProperty('--group-color', COLORS[group.id]);
+  return block;
 };
 
 const serverRow = (server: DevServer): HTMLElement => {

@@ -55,12 +55,21 @@ export const PANEL_STYLE = `
   .cols { padding: 0 2px 4px; color: var(--oc-muted); font-size: 11px; border-bottom: 1px solid var(--oc-border); }
   .cell { text-align: right; white-space: nowrap; }
   .quiet { color: var(--oc-muted); }
+  /* Three levels, told apart by size, weight and indent rather than boxes:
+     group heading, rows on a rail in the group's colour, unfolded members deeper and quieter. */
   .row { padding: 7px 2px; border-bottom: 1px solid color-mix(in srgb, var(--oc-border) 55%, transparent); }
-  .list > .row:last-child, .group > :last-child .row, .group > .row:last-child { border-bottom-color: transparent; }
-  .group { display: flex; flex-direction: column; padding-bottom: 6px; border-bottom: 1px solid var(--oc-border); }
-  .group-head { padding: 12px 2px 4px; }
+  .list > .row:last-child { border-bottom-color: transparent; }
+  .group { display: flex; flex-direction: column; padding: 4px 0 10px; border-bottom: 1px solid var(--oc-border); }
+  .group-head { padding: 12px 2px 6px; font-size: 13px; }
+  .group-head .cell { font-weight: 600; }
+  .group > .row, .group > .job-wrap { margin-left: 4px; padding-left: 12px;
+    border-left: 2px solid color-mix(in srgb, var(--group-color, var(--oc-border)) 40%, transparent); }
+  .group > .row { padding-top: 5px; padding-bottom: 5px; border-bottom: none; }
+  .group > .job-wrap > .row { padding: 5px 2px; border-bottom: none; }
+  .group .row .cell { color: color-mix(in srgb, var(--oc-fg) 80%, transparent); }
+  .group .row .cell.quiet { color: var(--oc-muted); }
   .gname { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .gname b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gname b { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .count { color: var(--oc-muted); font-weight: 400; }
   .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
   .who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
@@ -73,9 +82,11 @@ export const PANEL_STYLE = `
     border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
   .job.foldable.open .title-line::before { transform: rotate(90deg); }
   .job.foldable:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; border-radius: 4px; }
-  .members { display: flex; flex-direction: column; padding: 0 0 4px 14px; border-bottom: 1px solid color-mix(in srgb, var(--oc-border) 55%, transparent); }
-  .row.member { padding: 4px 2px; border-bottom: none; font-size: 11.5px; }
+  .members { display: flex; flex-direction: column; padding: 0 0 6px 16px; }
+  .row.member { padding: 3px 2px; border-bottom: none; font-size: 11.5px; }
   .row.member .pname { color: var(--oc-muted); }
+  .row.member .pdetail { font-size: 10.5px; }
+  .group .row.member .cell { color: var(--oc-muted); }
   .more { color: var(--oc-muted); padding: 2px 2px 4px; font-size: 11px; }
   /* Stop is a text button: no fill, it only changes colour, and asks once before acting. */
   .stop { flex: none; margin-left: auto; padding: 0 2px; border: 0; background: none; font: 11px var(--oc-font); color: var(--oc-muted); cursor: pointer; }

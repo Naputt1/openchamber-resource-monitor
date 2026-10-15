@@ -36,6 +36,8 @@ describe('processLabel', () => {
   test('the app root, this monitor, and ordinary processes', () => {
     expect(processLabel(row('OpenChamber', '/Applications/OpenChamber.app/Contents/MacOS/OpenChamber', [63418]), 'root')).toEqual({ title: 'Main process', detail: ':63418' });
     expect(processLabel(row('Resource Monitor', ''), 'self')).toEqual({ title: 'Resource Monitor', detail: 'this extension' });
+    expect(processLabel(row('npm exec http-server -p 8798 -s', 'npm exec http-server -p 8798 -s'), 'other')).toEqual({ title: 'npm exec http-server -p 8798 -s', detail: '' });
+    expect(processLabel(row('http-server', 'http-server', [8798]), 'other')).toEqual({ title: 'http-server', detail: ':8798' });
     expect(processLabel(row('opencode', '/Users/me/.opencode/bin/opencode serve --port 4096', [4096]), 'other'))
       .toEqual({ title: 'opencode', detail: ':4096 · serve --port 4096' });
   });

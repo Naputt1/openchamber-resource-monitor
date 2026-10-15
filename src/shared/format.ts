@@ -90,7 +90,10 @@ export const processLabel = (row: ProcessRow, role: 'root' | 'self' | 'other'): 
     const service = UTILITY_SERVICES.find(([pattern]) => pattern.test(subType))?.[1];
     return { title: service ?? HELPER_TYPES[type] ?? type, detail: ports };
   }
-  return { title: row.label || row.name, detail: join(ports, commandArguments(row.name, row.command)) };
+  const title = row.label || row.name;
+  // npm and friends rename their process to the command line; repeating it underneath says nothing.
+  const args = commandArguments(row.name, row.command);
+  return { title, detail: join(ports, args === title || args === row.name ? '' : args) };
 };
 
 export const platformName = (platform: string): string => {
