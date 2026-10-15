@@ -82,6 +82,8 @@ export const PANEL_STYLE = `
     border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
   .job.foldable.open .title-line::before { transform: rotate(90deg); }
   .job.foldable:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; border-radius: 4px; }
+  .job-wrap.open .pdetail { white-space: normal; overflow-wrap: anywhere; }
+  .pdetail { user-select: text; }
   .members { display: flex; flex-direction: column; padding: 0 0 6px 16px; }
   .row.member { padding: 3px 2px; border-bottom: none; font-size: 11.5px; }
   .row.member .pname { color: var(--oc-muted); }

@@ -10,6 +10,7 @@ import {
   formatBytes,
   formatPercent,
   formatUptime,
+  jobDetail,
   platformName,
   processLabel,
   setLocale,
@@ -143,8 +144,6 @@ const stopButton = (label: string, question: string, target: StopRequest): HTMLB
 const cpuCell = (value: number | null): HTMLElement => el('span', value !== null && value >= 1 ? 'cell num' : 'cell num quiet', formatPercent(value));
 const memoryCell = (value: number): HTMLElement => el('span', 'cell num', formatBytes(value));
 
-const portsText = (ports: readonly number[]): string => ports.map((port) => `:${port}`).join(' ');
-
 const textBlock = (title: string, detail: string, extra: Node[] = []): HTMLElement => {
   const titleLine = el('span', 'title-line', '', [el('span', 'pname', title), ...extra]);
   const block = el('div', 'who', '', [titleLine]);
@@ -165,12 +164,13 @@ const jobRow = (job: Job, stoppable: boolean): HTMLElement => {
   // A job with nothing worth unfolding is one plain row.
   const foldable = job.members.length > 0 && job.count > 1;
   const open = foldable && openJobs.has(job.pid);
-  const detail = [portsText(job.ports), job.count > 1 ? `${job.count} processes` : ''].filter(Boolean).join(' · ');
+  const detail = jobDetail(job);
   const extra: Node[] = stoppable ? [stopButton('Stop', `Stop ${job.title}?`, { kind: 'job', pid: job.pid, name: job.name })] : [];
   const line = el('div', foldable ? 'row job foldable' : 'row job', '', [textBlock(job.title, detail, extra), cpuCell(job.cpu), memoryCell(job.memory)]);
   line.title = job.command || job.title;
   line.classList.toggle('open', open);
-  const wrapper = el('div', 'job-wrap', '', [line]);
+  // Unfolded, commands wrap in full instead of ending in an ellipsis.
+  const wrapper = el('div', open ? 'job-wrap open' : 'job-wrap', '', [line]);
   if (foldable) {
     line.tabIndex = 0;
     line.setAttribute('role', 'button');

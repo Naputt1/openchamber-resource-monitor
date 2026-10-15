@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { ProcessRow } from './snapshot.ts';
-import { commandArguments, formatBytes, formatPercent, processLabel } from './format.ts';
+import { commandArguments, formatBytes, formatPercent, jobDetail, processLabel } from './format.ts';
 
 describe('commandArguments', () => {
   test('drops the executable path the row already names', () => {
@@ -27,7 +27,7 @@ describe('processLabel', () => {
 
   test('names Electron helpers by their role', () => {
     expect(processLabel(row('OpenChamber Helper (Renderer)', `${helpers}/OpenChamber Helper (Renderer).app/Contents/MacOS/OpenChamber Helper (Renderer) --type=renderer --lang=en`), 'other'))
-      .toEqual({ title: 'Renderer', detail: '' });
+      .toEqual({ title: 'Renderer', detail: '--type=renderer --lang=en' });
     expect(processLabel(row('OpenChamber Helper', `${helpers}/OpenChamber Helper.app/Contents/MacOS/OpenChamber Helper --type=gpu-process --user-data-dir=x`), 'other').title).toBe('GPU');
     expect(processLabel(row('OpenChamber Helper', `${helpers}/OpenChamber Helper.app/Contents/MacOS/OpenChamber Helper --type=utility --utility-sub-type=network.mojom.NetworkService`), 'other').title)
       .toBe('Network service');
@@ -40,6 +40,15 @@ describe('processLabel', () => {
     expect(processLabel(row('http-server', 'http-server', [8798]), 'other')).toEqual({ title: 'http-server', detail: ':8798' });
     expect(processLabel(row('opencode', '/Users/me/.opencode/bin/opencode serve --port 4096', [4096]), 'other'))
       .toEqual({ title: 'opencode', detail: ':4096 · serve --port 4096' });
+  });
+});
+
+describe('jobDetail', () => {
+  test('ports, size, and the exact arguments unless the title is already the command', () => {
+    expect(jobDetail({ name: 'claude', title: 'claude', command: '/opt/claude --output-format stream-json', ports: [], count: 1 })).toBe('--output-format stream-json');
+    expect(jobDetail({ name: 'bun', title: 'bun run dev', command: 'bun run dev', ports: [5180, 3902], count: 9 })).toBe(':5180 :3902 · 9 processes');
+    expect(jobDetail({ name: 'node', title: 'node dev-web-hmr.mjs', command: '/usr/bin/node /site/scripts/dev-web-hmr.mjs', ports: [], count: 2 }))
+      .toBe('2 processes · /site/scripts/dev-web-hmr.mjs');
   });
 });
 

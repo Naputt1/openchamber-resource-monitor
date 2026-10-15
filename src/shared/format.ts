@@ -88,12 +88,19 @@ export const processLabel = (row: ProcessRow, role: 'root' | 'self' | 'other'): 
   if (type && /\bHelper\b/.test(row.name)) {
     const subType = type === 'utility' ? /--utility-sub-type=([\w.]+)/.exec(row.command)?.[1] ?? '' : '';
     const service = UTILITY_SERVICES.find(([pattern]) => pattern.test(subType))?.[1];
-    return { title: service ?? HELPER_TYPES[type] ?? type, detail: ports };
+    return { title: service ?? HELPER_TYPES[type] ?? type, detail: join(ports, commandArguments(row.name, row.command)) };
   }
   const title = row.label || row.name;
   // npm and friends rename their process to the command line; repeating it underneath says nothing.
   const args = commandArguments(row.name, row.command);
   return { title, detail: join(ports, args === title || args === row.name ? '' : args) };
+};
+
+/** A job's detail line: ports, size, and the exact arguments unless the title already is the command. */
+export const jobDetail = (job: { name: string; title: string; command: string; ports: readonly number[]; count: number }): string => {
+  const args = commandArguments(job.name, job.command);
+  const repeatsTitle = args === job.title || args === job.name || job.command === job.title;
+  return join(job.ports.map((port) => `:${port}`).join(' '), job.count > 1 ? `${job.count} processes` : '', repeatsTitle ? '' : args);
 };
 
 export const platformName = (platform: string): string => {
