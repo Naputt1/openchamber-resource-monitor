@@ -11,6 +11,8 @@ export interface RawProcess {
   cpuSeconds: number;
   /** Start time in ms since the epoch, where the OS reuses parent pids (Windows). */
   startedAt?: number;
+  /** Controlling terminal (`ttys004`, a Linux tty number); absent without one or on Windows. */
+  tty?: string;
 }
 
 const toInt = (value: string | undefined): number => {
@@ -34,23 +36,25 @@ export const parseCpuTime = (value: string): number => {
   return Number(daysPart) * 86_400 + seconds;
 };
 
-/** `ps -A -o pid=,ppid=,rss=,cputime=,comm=` on macOS. `comm` is last because it may hold spaces. */
+/** `ps -A -o pid=,ppid=,rss=,cputime=,tty=,comm=` on macOS. `comm` is last because it may hold spaces. */
 export const parsePsList = (stdout: string): RawProcess[] => {
   const rows: RawProcess[] = [];
   for (const line of stdout.split('\n')) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
     if (!match) continue;
     const pid = toInt(match[1]);
     const ppid = toInt(match[2]);
     const rssKb = toInt(match[3]);
     const cpuSeconds = parseCpuTime(match[4] ?? '');
     if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
+    const tty = match[5] ?? '??';
     rows.push({
       pid,
       ppid,
-      name: basename(match[5] ?? ''),
+      name: basename(match[6] ?? ''),
       memory: Number.isFinite(rssKb) ? rssKb * 1024 : 0,
       cpuSeconds: Number.isFinite(cpuSeconds) ? cpuSeconds : 0,
+      ...(tty === '??' || tty === '-' ? {} : { tty }),
     });
   }
   return rows;
@@ -104,8 +108,9 @@ export const parseLinuxStat = (content: string, ticksPerSecond: number, pageSize
   if (open < 0 || close < open) return null;
   const pid = toInt(content.slice(0, open));
   const fields = content.slice(close + 2).split(' ');
-  // After the name: state(0) ppid(1) ... utime(11) stime(12) ... rss(21).
+  // After the name: state(0) ppid(1) pgrp(2) session(3) tty_nr(4) ... utime(11) stime(12) ... rss(21).
   const ppid = toInt(fields[1]);
+  const tty = fields[4];
   const utime = toInt(fields[11]);
   const stime = toInt(fields[12]);
   const rss = toInt(fields[21]);
@@ -116,6 +121,7 @@ export const parseLinuxStat = (content: string, ticksPerSecond: number, pageSize
     name: content.slice(open + 1, close),
     memory: Number.isFinite(rss) ? rss * pageSize : 0,
     cpuSeconds: Number.isFinite(utime + stime) ? (utime + stime) / ticksPerSecond : 0,
+    ...(tty && tty !== '0' ? { tty } : {}),
   };
 };
 

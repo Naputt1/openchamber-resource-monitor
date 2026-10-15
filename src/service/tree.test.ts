@@ -96,6 +96,22 @@ describe('process tree', () => {
     expect(tree.groups[0]?.processes.some((row) => row.pid === 500 && row.ports.includes(54321))).toBe(true);
   });
 
+  test('a project action that exec\'d into its command still counts as the terminal', () => {
+    // `zsh -lic "bun run dev"` replaces the shell, so the PTY child is bun itself.
+    const withAction = [...processes, { ...proc(600, 100, 'bun', 90), tty: 'ttys007' }, { ...proc(601, 600, 'node', 60), tty: 'ttys007' }];
+    const members = collectTree(withAction, 100, 400);
+    const tree = buildTreeView({ members, processes: withAction, rootPid: 100, selfPid: 400, cpu, commands: new Map([...commands, [601, 'node /site/node_modules/.bin/astro dev']]), ports: new Map([...ports, [601, [4321]]]) });
+    expect(tree.groups.find((group) => group.id === 'terminals')?.processes.map((row) => row.pid)).toEqual([600, 601, 300, 301]);
+    expect(tree.servers.map((server) => [server.ports, server.name])).toContainEqual([[4321], 'astro']);
+  });
+
+  test('a child sharing the app\'s own terminal is still the app (dev builds started from a shell)', () => {
+    const fromShell = processes.map((row) => (row.pid === 100 || row.pid === 101 ? { ...row, tty: 'ttys001' } : row));
+    const members = collectTree(fromShell, 100, 400);
+    const tree = buildTreeView({ members, processes: fromShell, rootPid: 100, selfPid: 400, cpu, commands, ports });
+    expect(tree.groups[0]?.processes.map((row) => row.pid)).toContain(101);
+  });
+
   test('on Windows a process older than its recorded parent is not its child', () => {
     const start = (row: RawProcess, startedAt: number): RawProcess => ({ ...row, startedAt });
     // pid 10 was reused by the app after the old parent of 30 died.

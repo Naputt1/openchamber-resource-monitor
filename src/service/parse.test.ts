@@ -27,12 +27,14 @@ describe('macOS', () => {
 
   test('ps list keeps names with spaces', () => {
     const rows = parsePsList([
-      '    1     0  18160  18:29.43 /sbin/launchd',
-      '41761 41745 556032   1:02.10 /Applications/OpenChamber.app/Contents/Frameworks/OpenChamber Helper (Renderer).app/Contents/MacOS/OpenChamber Helper (Renderer)',
+      '    1     0  18160  18:29.43 ??       /sbin/launchd',
+      '41761 41745 556032   1:02.10 ??       /Applications/OpenChamber.app/Contents/Frameworks/OpenChamber Helper (Renderer).app/Contents/MacOS/OpenChamber Helper (Renderer)',
+      '52000 41745  90000   0:03.00 ttys004  node',
       'garbage',
     ].join('\n'));
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows[1]).toEqual({ pid: 41761, ppid: 41745, name: 'OpenChamber Helper (Renderer)', memory: 556032 * 1024, cpuSeconds: 62.1 });
+    expect(rows[2]).toMatchObject({ pid: 52000, name: 'node', tty: 'ttys004' });
   });
 
   test('ps commands', () => {
@@ -60,6 +62,8 @@ describe('macOS', () => {
 
 describe('Linux', () => {
   test('stat with spaces and parentheses in the name', () => {
+    const withTty = parseLinuxStat(`77 (node) ${['S', '41', '77', '77', '34817', ...Array.from({ length: 17 }, () => '0')].join(' ')}`, 100, 4096);
+    expect(withTty?.tty).toBe('34817');
     const fields = ['S', '41', '1', '1', '0', '-1', '0', '0', '0', '0', '0', '250', '50', '0', '0', '20', '0', '1', '0', '100', '1000', '300'];
     const row = parseLinuxStat(`4242 (my (odd) proc) ${fields.join(' ')}`, 100, 4096);
     expect(row).toEqual({ pid: 4242, ppid: 41, name: 'my (odd) proc', memory: 300 * 4096, cpuSeconds: 3 });

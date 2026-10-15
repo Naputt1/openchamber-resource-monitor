@@ -49,7 +49,7 @@ const freeMemoryFallback = (): number => os.totalmem() - os.freemem();
 // ----- macOS and other Unix systems with BSD ps -----
 
 const psSource = (): ProcessSource => ({
-  list: async () => parsePsList(await run('ps', ['-A', '-o', 'pid=,ppid=,rss=,cputime=,comm='])),
+  list: async () => parsePsList(await run('ps', ['-A', '-o', 'pid=,ppid=,rss=,cputime=,tty=,comm='])),
   commands: async (pids) => {
     const commands = new Map<number, string>();
     for (const part of chunks(pids, 200)) {

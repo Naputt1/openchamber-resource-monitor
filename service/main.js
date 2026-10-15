@@ -50,6 +50,7 @@ var collectTree = (processes, rootPid, selfPid) => {
 var servesOpenCode = (name, command) => isOpenCodeName(name) && /\sserve(\s|$)/.test(command);
 var classifyBranches = (members, commands) => {
   const groups = new Map;
+  const rootTty = [...members.values()].find((member) => member.depth === 0)?.process.tty;
   for (const member of members.values()) {
     if (member.depth !== 1)
       continue;
@@ -61,8 +62,11 @@ var classifyBranches = (members, commands) => {
     const wrapsOpenCode = [...members.values()].some((other) => other.branch === pid && other.depth === 2 && servesOpenCode(other.process.name, commands.get(other.process.pid) ?? ""));
     if (wrapsOpenCode)
       groups.set(pid, "opencode");
-    else
-      groups.set(pid, isShellName(name) ? "terminals" : "app");
+    else {
+      const { tty } = member.process;
+      const inTerminal = isShellName(name) || tty !== undefined && tty !== rootTty;
+      groups.set(pid, inTerminal ? "terminals" : "app");
+    }
   }
   return groups;
 };
@@ -389,7 +393,7 @@ var parsePsList = (stdout) => {
   const rows = [];
   for (const line of stdout.split(`
 `)) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.+?)\s*$/.exec(line);
     if (!match)
       continue;
     const pid = toInt(match[1]);
@@ -398,12 +402,14 @@ var parsePsList = (stdout) => {
     const cpuSeconds = parseCpuTime(match[4] ?? "");
     if (!Number.isFinite(pid) || !Number.isFinite(ppid))
       continue;
+    const tty = match[5] ?? "??";
     rows.push({
       pid,
       ppid,
-      name: basename(match[5] ?? ""),
+      name: basename(match[6] ?? ""),
       memory: Number.isFinite(rssKb) ? rssKb * 1024 : 0,
-      cpuSeconds: Number.isFinite(cpuSeconds) ? cpuSeconds : 0
+      cpuSeconds: Number.isFinite(cpuSeconds) ? cpuSeconds : 0,
+      ...tty === "??" || tty === "-" ? {} : { tty }
     });
   }
   return rows;
@@ -448,6 +454,7 @@ var parseLinuxStat = (content, ticksPerSecond, pageSize) => {
   const pid = toInt(content.slice(0, open));
   const fields = content.slice(close + 2).split(" ");
   const ppid = toInt(fields[1]);
+  const tty = fields[4];
   const utime = toInt(fields[11]);
   const stime = toInt(fields[12]);
   const rss = toInt(fields[21]);
@@ -458,7 +465,8 @@ var parseLinuxStat = (content, ticksPerSecond, pageSize) => {
     ppid,
     name: content.slice(open + 1, close),
     memory: Number.isFinite(rss) ? rss * pageSize : 0,
-    cpuSeconds: Number.isFinite(utime + stime) ? (utime + stime) / ticksPerSecond : 0
+    cpuSeconds: Number.isFinite(utime + stime) ? (utime + stime) / ticksPerSecond : 0,
+    ...tty && tty !== "0" ? { tty } : {}
   };
 };
 var parseCmdline = (content) => content.split("\x00").filter(Boolean).join(" ");
@@ -564,7 +572,7 @@ var chunks = (items, size) => {
 };
 var freeMemoryFallback = () => os2.totalmem() - os2.freemem();
 var psSource = () => ({
-  list: async () => parsePsList(await run("ps", ["-A", "-o", "pid=,ppid=,rss=,cputime=,comm="])),
+  list: async () => parsePsList(await run("ps", ["-A", "-o", "pid=,ppid=,rss=,cputime=,tty=,comm="])),
   commands: async (pids) => {
     const commands = new Map;
     for (const part of chunks(pids, 200)) {

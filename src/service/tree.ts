@@ -66,13 +66,18 @@ const servesOpenCode = (name: string, command: string): boolean => isOpenCodeNam
 /**
  * A child of the root is OpenCode when it is OpenCode, or a thin wrapper
  * (Windows starts `opencode.cmd` through cmd) whose own child serves it.
- * Other shells under the root are the built-in terminal.
+ * The built-in terminal and project actions run in a PTY: a shell, or on
+ * macOS and Linux whatever the shell exec'd into (`zsh -c "bun run dev"`
+ * becomes `bun`), which still holds a terminal the app itself doesn't.
+ * Everything else is the app's own plumbing: Electron helpers, other
+ * extensions' services, tunnel helpers.
  */
 export const classifyBranches = (
   members: ReadonlyMap<number, TreeMember>,
   commands: ReadonlyMap<number, string>,
 ): Map<number, GroupId> => {
   const groups = new Map<number, GroupId>();
+  const rootTty = [...members.values()].find((member) => member.depth === 0)?.process.tty;
   for (const member of members.values()) {
     if (member.depth !== 1) continue;
     const { pid, name } = member.process;
@@ -80,7 +85,11 @@ export const classifyBranches = (
     const wrapsOpenCode = [...members.values()].some((other) => other.branch === pid && other.depth === 2
       && servesOpenCode(other.process.name, commands.get(other.process.pid) ?? ''));
     if (wrapsOpenCode) groups.set(pid, 'opencode');
-    else groups.set(pid, isShellName(name) ? 'terminals' : 'app');
+    else {
+      const { tty } = member.process;
+      const inTerminal = isShellName(name) || (tty !== undefined && tty !== rootTty);
+      groups.set(pid, inTerminal ? 'terminals' : 'app');
+    }
   }
   return groups;
 };
