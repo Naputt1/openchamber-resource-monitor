@@ -1,0 +1,50 @@
+{
+  "name": "openchamber-resource-monitor",
+  "version": "1.0.0",
+  "description": "CPU and memory of your machine, of OpenChamber and OpenCode with everything they started, and of the dev servers running under them",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "openchamber": {
+    "apiVersion": 1,
+    "engines": {
+      "openchamber": ">=2.3.3"
+    },
+    "contributes": {
+      "panel": {
+        "id": "resource-monitor",
+        "name": "Resource Monitor",
+        "icon": "pulse",
+        "entry": "panel/index.html"
+      },
+      "statusSection": {
+        "entry": "status/index.html",
+        "title": "Resources",
+        "height": 76
+      },
+      "service": {
+        "entry": "service/main.js",
+        "runtime": "host",
+        "permissions": {
+          "exec": [
+            "ps",
+            "lsof",
+            "vm_stat",
+            "powershell",
+            "netstat"
+          ]
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src"
+  },
+  "devDependencies": {
+    "@openchamber/sdk": "^2.3.3",
+    "@types/bun": "^1.4.2",
+    "typescript": "^5.9.2"
+  }
+}

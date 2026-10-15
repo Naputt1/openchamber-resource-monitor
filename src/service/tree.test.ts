@@ -1,0 +1,115 @@
+import { describe, expect, test } from 'bun:test';
+
+import type { RawProcess } from './parse.ts';
+import { buildTreeView, collectTree, describeProcess, GROUP_PROCESS_LIMIT } from './tree.ts';
+
+const MB = 1024 * 1024;
+const proc = (pid: number, ppid: number, name: string, memoryMb = 10): RawProcess => ({ pid, ppid, name, memory: memoryMb * MB, cpuSeconds: 0 });
+
+// launchd → OpenChamber → helpers, OpenCode (→ agent shell → vite), a terminal (→ next), this service (→ ps)
+const processes: RawProcess[] = [
+  proc(1, 0, 'launchd'),
+  proc(100, 1, 'OpenChamber', 300),
+  proc(101, 100, 'OpenChamber Helper (Renderer)', 500),
+  proc(102, 100, 'OpenChamber Helper (GPU)', 80),
+  proc(200, 100, 'opencode', 600),
+  proc(201, 200, 'zsh', 3),
+  proc(202, 201, 'node', 120),
+  proc(203, 202, 'esbuild', 30),
+  proc(300, 100, 'zsh', 4),
+  proc(301, 300, 'node', 200),
+  proc(400, 100, 'node', 30),
+  proc(401, 400, 'ps', 1),
+  proc(900, 1, 'opencode', 400),
+  proc(901, 900, 'opencode', 50),
+  proc(950, 1, 'Safari', 900),
+];
+
+const commands = new Map([
+  [200, '/Users/me/.opencode/bin/opencode serve --port 4096'],
+  [202, 'node /repo/node_modules/.bin/vite --port 5173'],
+  [301, 'node /repo/node_modules/next/dist/bin/next dev'],
+  [900, 'opencode'],
+]);
+
+const ports = new Map([[100, [3000]], [200, [4096]], [202, [5173]], [301, [3001]]]);
+const cpu = new Map<number, number | null>([[100, 1], [101, 2], [200, 3], [202, 4], [203, 1], [301, 2], [400, 0.5], [900, 1], [901, 1]]);
+
+const view = () => {
+  const members = collectTree(processes, 100, 400);
+  return { members, view: buildTreeView({ members, processes, rootPid: 100, selfPid: 400, cpu, commands, ports }) };
+};
+
+describe('process tree', () => {
+  test('takes the root and everything under it, but not the service\'s own ps', () => {
+    const { members } = view();
+    expect([...members.keys()].sort((a, b) => a - b)).toEqual([100, 101, 102, 200, 201, 202, 203, 300, 301, 400]);
+  });
+
+  test('groups the app, OpenCode with what agents started, and the terminal', () => {
+    const { view: tree } = view();
+    expect(tree.groups.map((group) => [group.id, group.processes.map((row) => `${row.depth}:${row.pid}`)])).toEqual([
+      ['app', ['0:100', '1:101', '1:102', '1:400']],
+      ['opencode', ['0:200', '1:201', '2:202', '3:203']],
+      ['terminals', ['0:300', '1:301']],
+    ]);
+    const app = tree.groups[0];
+    expect(app?.memory).toBe((300 + 500 + 80 + 30) * MB);
+    expect(app?.processes.at(-1)?.name).toBe('Resource Monitor');
+    expect(tree.memory).toBe((300 + 500 + 80 + 600 + 3 + 120 + 30 + 4 + 200 + 30) * MB);
+    expect(tree.cpu).toBeCloseTo(1 + 2 + 3 + 4 + 1 + 2 + 0.5);
+  });
+
+  test('dev servers skip the app and OpenCode\'s own ports and count their children', () => {
+    const { view: tree } = view();
+    expect(tree.servers.map((server) => [server.ports, server.name, server.group])).toEqual([
+      [[3001], 'next', 'terminals'],
+      [[5173], 'vite', 'opencode'],
+    ]);
+    expect(tree.servers[1]?.memory).toBe(150 * MB);
+    expect(tree.servers[1]?.cpu).toBe(5);
+  });
+
+  test('OpenCode outside the app is listed once with its children', () => {
+    const { view: tree } = view();
+    expect(tree.outside.map((row) => [row.pid, row.memory / MB, row.cpu])).toEqual([[900, 450, 2]]);
+  });
+
+  test('a Windows wrapper that serves OpenCode counts as OpenCode', () => {
+    const windows = [proc(10, 0, 'OpenChamber.exe'), proc(11, 10, 'cmd.exe'), proc(12, 11, 'opencode.exe'), proc(13, 10, 'pwsh.exe')];
+    const members = collectTree(windows, 10, 99);
+    const tree = buildTreeView({ members, processes: windows, rootPid: 10, selfPid: 99, cpu: new Map(), commands: new Map([[12, 'opencode.exe serve --port 1']]), ports: new Map() });
+    expect(tree.groups.map((group) => [group.id, group.processes.map((row) => row.pid)])).toEqual([
+      ['app', [10]],
+      ['opencode', [11, 12]],
+      ['terminals', [13]],
+    ]);
+    expect(tree.rootName).toBe('OpenChamber');
+  });
+
+  test('a missing root yields an empty view, not a crash', () => {
+    const members = collectTree(processes, 12345, 400);
+    expect(members.size).toBe(0);
+    expect(buildTreeView({ members, processes, rootPid: 12345, selfPid: 400, cpu, commands, ports }).groups).toEqual([]);
+  });
+
+  test('a huge group is cut and says how many are hidden', () => {
+    const many = [proc(1, 0, 'app'), proc(2, 1, 'opencode'), ...Array.from({ length: GROUP_PROCESS_LIMIT + 5 }, (_, index) => proc(10 + index, 2, 'mcp'))];
+    const members = collectTree(many, 1, 999);
+    const group = buildTreeView({ members, processes: many, rootPid: 1, selfPid: 999, cpu: new Map(), commands: new Map(), ports: new Map() }).groups[1];
+    expect(group?.processes).toHaveLength(GROUP_PROCESS_LIMIT);
+    expect(group?.hidden).toBe(6);
+  });
+});
+
+describe('describeProcess', () => {
+  test('names a runtime by the script it runs', () => {
+    expect(describeProcess('node', 'node /repo/node_modules/vite/bin/vite.js --port 5173')).toBe('vite');
+    expect(describeProcess('node', 'node /repo/node_modules/next/dist/bin/next dev')).toBe('next');
+    expect(describeProcess('node.exe', 'node C:\\repo\\node_modules\\@angular\\cli\\bin\\cli.js serve')).toBe('@angular/cli');
+    expect(describeProcess('bun', 'bun run dev')).toBe('dev');
+    expect(describeProcess('Python', 'python3 -m http.server 8765')).toBe('http.server');
+    expect(describeProcess('node', '')).toBe('node');
+    expect(describeProcess('postgres', '/usr/bin/postgres -D data')).toBe('postgres');
+  });
+});

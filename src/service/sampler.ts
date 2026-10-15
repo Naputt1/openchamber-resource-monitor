@@ -1,0 +1,191 @@
+// Turns OS readings into a Snapshot, one sample at a time, and keeps the
+// short history the charts draw.
+import os from 'node:os';
+
+import type { RawProcess } from './parse.ts';
+import type { ProcessSource } from './sources.ts';
+import { buildTreeView, collectTree, isOpenCodeName } from './tree.ts';
+import { HISTORY_POINTS, type Percent, type Snapshot, type SystemStats, type Warning } from '../shared/snapshot.ts';
+
+export const SAMPLE_INTERVAL_MS = 2_000;
+/** Listening ports change rarely and cost the most to read, so every other sample. */
+const PORTS_EVERY = 2;
+
+interface CpuTimes { idle: number; total: number }
+
+const cpuTimes = (): CpuTimes[] => os.cpus().map(({ times }) => ({
+  idle: times.idle,
+  total: times.user + times.nice + times.sys + times.idle + times.irq,
+}));
+
+const clampPercent = (value: number): Percent => Math.min(100, Math.max(0, value));
+
+const push = (series: number[], value: number): void => {
+  series.push(value);
+  if (series.length > HISTORY_POINTS) series.splice(0, series.length - HISTORY_POINTS);
+};
+
+export class Sampler {
+  private previousCores: CpuTimes[] | null = null;
+  private previousCpu = new Map<number, { seconds: number; name: string }>();
+  private previousAt = 0;
+  private commandCache = new Map<number, { name: string; command: string }>();
+  private portsCache = new Map<number, number[]>();
+  private portsWarning = false;
+  private samples = 0;
+  private history = { system: { cpu: [] as number[], memory: [] as number[] }, app: { cpu: [] as number[], memory: [] as number[] } };
+
+  constructor(
+    private readonly source: ProcessSource,
+    private readonly rootPid: number,
+    private readonly selfPid: number,
+  ) {}
+
+  /** Forget everything time-dependent, so a restart after idling draws no line across the gap. */
+  reset(): void {
+    this.previousCores = null;
+    this.previousCpu.clear();
+    this.previousAt = 0;
+    this.samples = 0;
+    this.history = { system: { cpu: [], memory: [] }, app: { cpu: [], memory: [] } };
+  }
+
+  private systemCpu(): { total: Percent | null; perCore: Percent[] } {
+    const now = cpuTimes();
+    const before = this.previousCores;
+    this.previousCores = now;
+    if (!before || before.length !== now.length) return { total: null, perCore: [] };
+    let idle = 0;
+    let total = 0;
+    const perCore = now.map((core, index) => {
+      const previous = before[index];
+      if (!previous) return 0;
+      const coreIdle = core.idle - previous.idle;
+      const coreTotal = core.total - previous.total;
+      idle += coreIdle;
+      total += coreTotal;
+      return coreTotal > 0 ? clampPercent(100 * (1 - coreIdle / coreTotal)) : 0;
+    });
+    return { total: total > 0 ? clampPercent(100 * (1 - idle / total)) : null, perCore };
+  }
+
+  private processCpu(processes: readonly RawProcess[], at: number, cores: number): Map<number, Percent | null> {
+    const elapsed = (at - this.previousAt) / 1000;
+    const cpu = new Map<number, Percent | null>();
+    const next = new Map<number, { seconds: number; name: string }>();
+    for (const process of processes) {
+      next.set(process.pid, { seconds: process.cpuSeconds, name: process.name });
+      const previous = this.previousCpu.get(process.pid);
+      // A reused pid shows up under another name; it gets no number until its second sample.
+      if (!previous || previous.name !== process.name || this.previousAt === 0 || elapsed <= 0) {
+        cpu.set(process.pid, null);
+        continue;
+      }
+      const used = Math.max(0, process.cpuSeconds - previous.seconds);
+      cpu.set(process.pid, clampPercent((100 * used) / elapsed / cores));
+    }
+    this.previousCpu = next;
+    this.previousAt = at;
+    return cpu;
+  }
+
+  private async commandsFor(processes: readonly RawProcess[], pids: readonly number[]): Promise<Map<number, string>> {
+    const byPid = new Map(processes.map((process) => [process.pid, process]));
+    for (const pid of this.commandCache.keys()) {
+      if (byPid.get(pid)?.name !== this.commandCache.get(pid)?.name) this.commandCache.delete(pid);
+    }
+    const missing = pids.filter((pid) => !this.commandCache.has(pid));
+    if (missing.length > 0) {
+      try {
+        const found = await this.source.commands(missing);
+        for (const pid of missing) {
+          const process = byPid.get(pid);
+          if (process) this.commandCache.set(pid, { name: process.name, command: found.get(pid) ?? '' });
+        }
+      } catch {
+        // Commands are detail; rows still show names. The next sample asks again.
+      }
+    }
+    return new Map(pids.map((pid) => [pid, this.commandCache.get(pid)?.command ?? '']));
+  }
+
+  private async portsFor(pids: readonly number[]): Promise<Map<number, number[]>> {
+    if (this.samples % PORTS_EVERY !== 1 && this.samples > 1) return this.portsCache;
+    try {
+      this.portsCache = await this.source.ports(pids);
+      this.portsWarning = false;
+    } catch {
+      this.portsCache = new Map();
+      this.portsWarning = true;
+    }
+    return this.portsCache;
+  }
+
+  async sample(): Promise<Snapshot> {
+    this.samples += 1;
+    const warnings: Warning[] = [];
+    const cores = Math.max(1, os.cpus().length);
+    const at = Date.now();
+    const { total: systemCpu, perCore } = this.systemCpu();
+    let memoryUsed: number;
+    try {
+      memoryUsed = await this.source.memoryUsed();
+    } catch {
+      memoryUsed = os.totalmem() - os.freemem();
+    }
+
+    let processes: RawProcess[] = [];
+    try {
+      processes = await this.source.list();
+    } catch {
+      warnings.push('processes-unavailable');
+    }
+    const cpu = this.processCpu(processes, at, cores);
+    const members = collectTree(processes, this.rootPid, this.selfPid);
+    const outsideCandidates = processes.filter((process) => !members.has(process.pid) && isOpenCodeName(process.name));
+    const detailPids = [...members.keys(), ...outsideCandidates.map((process) => process.pid)];
+    const commands = await this.commandsFor(processes, detailPids);
+    const ports = members.size > 0 ? await this.portsFor([...members.keys()]) : new Map<number, number[]>();
+    if (this.portsWarning) warnings.push('ports-unavailable');
+    const view = buildTreeView({ members, processes, rootPid: this.rootPid, selfPid: this.selfPid, cpu, commands, ports });
+
+    const load = os.loadavg();
+    const firstCpu = os.cpus()[0];
+    const system: SystemStats = {
+      hostname: os.hostname(),
+      platform: process.platform,
+      release: os.release(),
+      arch: os.arch(),
+      cpuModel: firstCpu?.model.trim() ?? '',
+      cores,
+      cpu: systemCpu,
+      perCore,
+      load: process.platform === 'win32' ? null : [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
+      memoryTotal: os.totalmem(),
+      memoryUsed,
+      uptimeSeconds: os.uptime(),
+    };
+
+    // Points without a CPU reading yet would draw a false zero.
+    if (systemCpu !== null) {
+      push(this.history.system.cpu, systemCpu);
+      push(this.history.system.memory, memoryUsed);
+      push(this.history.app.cpu, view.cpu);
+      push(this.history.app.memory, view.memory);
+    }
+
+    return {
+      at,
+      intervalMs: SAMPLE_INTERVAL_MS,
+      system,
+      app: { rootPid: this.rootPid, rootName: view.rootName, cpu: view.cpu, memory: view.memory, groups: view.groups },
+      outside: view.outside,
+      servers: view.servers,
+      history: {
+        system: { cpu: [...this.history.system.cpu], memory: [...this.history.system.memory] },
+        app: { cpu: [...this.history.app.cpu], memory: [...this.history.app.memory] },
+      },
+      warnings,
+    };
+  }
+}
