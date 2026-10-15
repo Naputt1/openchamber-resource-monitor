@@ -1,5 +1,5 @@
 // Number formatting shared by the panel and the Work Status section.
-import type { GroupId } from './snapshot.ts';
+import type { GroupId, ProcessRow } from './snapshot.ts';
 
 let locale = 'en';
 export const setLocale = (next: string): void => {
@@ -57,6 +57,40 @@ export const commandArguments = (name: string, command: string): string => {
     if (after === '' || after.startsWith(' ')) return after.trim();
   }
   return command;
+};
+
+const HELPER_TYPES: Record<string, string> = {
+  renderer: 'Renderer',
+  'gpu-process': 'GPU',
+  utility: 'Utility',
+  zygote: 'Zygote',
+};
+
+const UTILITY_SERVICES: [RegExp, string][] = [
+  [/network/i, 'Network service'],
+  [/storage/i, 'Storage service'],
+  [/audio/i, 'Audio service'],
+  [/video_?capture/i, 'Video capture'],
+];
+
+const join = (...parts: string[]): string => parts.filter(Boolean).join(' · ');
+
+/**
+ * What a process row says: a title people recognise and one muted detail line.
+ * Electron helpers are named by their role (`Renderer`, `GPU`) instead of
+ * `OpenChamber Helper (Renderer)` with a screen of flags.
+ */
+export const processLabel = (row: ProcessRow, role: 'root' | 'self' | 'other'): { title: string; detail: string } => {
+  const ports = row.ports.map((port) => `:${port}`).join(' ');
+  if (role === 'root') return { title: 'Main process', detail: join(ports, commandArguments(row.name, row.command)) };
+  if (role === 'self') return { title: 'Resource Monitor', detail: 'this extension' };
+  const type = /--type=([\w-]+)/.exec(row.command)?.[1];
+  if (type && /\bHelper\b/.test(row.name)) {
+    const subType = type === 'utility' ? /--utility-sub-type=([\w.]+)/.exec(row.command)?.[1] ?? '' : '';
+    const service = UTILITY_SERVICES.find(([pattern]) => pattern.test(subType))?.[1];
+    return { title: service ?? HELPER_TYPES[type] ?? type, detail: ports };
+  }
+  return { title: row.name, detail: join(ports, commandArguments(row.name, row.command)) };
 };
 
 export const platformName = (platform: string): string => {

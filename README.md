@@ -22,7 +22,7 @@ When the connected OpenChamber runs on another machine, the monitor shows that m
 
 ## What the numbers mean
 
-- CPU is a share of the whole machine, all cores together, so rows add up to the totals. Activity Monitor and `top` count 100% per core instead.
+- Process CPU counts 100% per core, as Activity Monitor and `top` do, so a process keeping two cores busy reads 200%. The CPU card at the top is the whole machine, all cores together.
 - Memory is resident memory. Pages several processes share, such as Electron's, count in each of them, so the app's total runs a little high.
 - System memory in use is counted the way the OS's own monitor does: app memory, wired and compressed on macOS, total minus available on Linux, used physical memory on Windows.
 

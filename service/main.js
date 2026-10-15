@@ -227,20 +227,17 @@ class Sampler {
     const before = this.previousCores;
     this.previousCores = now;
     if (!before || before.length !== now.length)
-      return { total: null, perCore: [] };
+      return null;
     let idle = 0;
     let total = 0;
-    const perCore = now.map((core, index) => {
+    now.forEach((core, index) => {
       const previous = before[index];
       if (!previous)
-        return 0;
-      const coreIdle = core.idle - previous.idle;
-      const coreTotal = core.total - previous.total;
-      idle += coreIdle;
-      total += coreTotal;
-      return coreTotal > 0 ? clampPercent(100 * (1 - coreIdle / coreTotal)) : 0;
+        return;
+      idle += core.idle - previous.idle;
+      total += core.total - previous.total;
     });
-    return { total: total > 0 ? clampPercent(100 * (1 - idle / total)) : null, perCore };
+    return total > 0 ? clampPercent(100 * (1 - idle / total)) : null;
   }
   processCpu(processes, at, cores) {
     const elapsed = (at - this.previousAt) / 1000;
@@ -254,7 +251,7 @@ class Sampler {
         continue;
       }
       const used = Math.max(0, process2.cpuSeconds - previous.seconds);
-      cpu.set(process2.pid, clampPercent(100 * used / elapsed / cores));
+      cpu.set(process2.pid, Math.min(100 * cores, 100 * used / elapsed));
     }
     this.previousCpu = next;
     this.previousAt = at;
@@ -296,7 +293,7 @@ class Sampler {
     const warnings = [];
     const cores = Math.max(1, os.cpus().length);
     const at = Date.now();
-    const { total: systemCpu, perCore } = this.systemCpu();
+    const systemCpu = this.systemCpu();
     let memoryUsed;
     try {
       memoryUsed = await this.source.memoryUsed();
@@ -334,7 +331,6 @@ class Sampler {
       cpuModel: firstCpu?.model.trim() ?? "",
       cores,
       cpu: systemCpu,
-      perCore,
       load: process.platform === "win32" ? null : [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
       memoryTotal: os.totalmem(),
       memoryUsed,

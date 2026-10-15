@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
-import { commandArguments, formatBytes, formatPercent } from './format.ts';
+import type { ProcessRow } from './snapshot.ts';
+import { commandArguments, formatBytes, formatPercent, processLabel } from './format.ts';
 
 describe('commandArguments', () => {
   test('drops the executable path the row already names', () => {
@@ -20,6 +21,26 @@ describe('commandArguments', () => {
   });
 });
 
+describe('processLabel', () => {
+  const row = (name: string, command: string, ports: number[] = []): ProcessRow => ({ pid: 1, ppid: 0, name, command, cpu: null, memory: 0, depth: 1, ports });
+  const helpers = '/Applications/OpenChamber.app/Contents/Frameworks';
+
+  test('names Electron helpers by their role', () => {
+    expect(processLabel(row('OpenChamber Helper (Renderer)', `${helpers}/OpenChamber Helper (Renderer).app/Contents/MacOS/OpenChamber Helper (Renderer) --type=renderer --lang=en`), 'other'))
+      .toEqual({ title: 'Renderer', detail: '' });
+    expect(processLabel(row('OpenChamber Helper', `${helpers}/OpenChamber Helper.app/Contents/MacOS/OpenChamber Helper --type=gpu-process --user-data-dir=x`), 'other').title).toBe('GPU');
+    expect(processLabel(row('OpenChamber Helper', `${helpers}/OpenChamber Helper.app/Contents/MacOS/OpenChamber Helper --type=utility --utility-sub-type=network.mojom.NetworkService`), 'other').title)
+      .toBe('Network service');
+  });
+
+  test('the app root, this monitor, and ordinary processes', () => {
+    expect(processLabel(row('OpenChamber', '/Applications/OpenChamber.app/Contents/MacOS/OpenChamber', [63418]), 'root')).toEqual({ title: 'Main process', detail: ':63418' });
+    expect(processLabel(row('Resource Monitor', ''), 'self')).toEqual({ title: 'Resource Monitor', detail: 'this extension' });
+    expect(processLabel(row('opencode', '/Users/me/.opencode/bin/opencode serve --port 4096', [4096]), 'other'))
+      .toEqual({ title: 'opencode', detail: ':4096 · serve --port 4096' });
+  });
+});
+
 describe('formatting', () => {
   test('bytes and percents', () => {
     expect(formatBytes(512)).toBe('512 B');
@@ -29,5 +50,6 @@ describe('formatting', () => {
     expect(formatPercent(0.04)).toBe('<0.1%');
     expect(formatPercent(4.25)).toBe('4.3%');
     expect(formatPercent(44.4)).toBe('44%');
+    expect(formatPercent(250)).toBe('250%');
   });
 });

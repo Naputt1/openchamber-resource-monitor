@@ -12,6 +12,7 @@ import {
   formatPercent,
   formatUptime,
   platformName,
+  processLabel,
   setLocale,
 } from '../shared/format.ts';
 import { el } from '../shared/dom.ts';
@@ -49,11 +50,7 @@ const statCard = (label: string, color: string, format: (value: number) => strin
 };
 
 const cpu = statCard('CPU', COLORS.cpu, formatPercent);
-const cores = el('div', 'cores');
-cpu.card.append(cores);
 const memory = statCard('Memory', COLORS.memory, formatBytes);
-const memoryShare = el('div', 'stack');
-memory.card.append(memoryShare);
 
 const grid = el('div', 'grid', '', [cpu.card, memory.card]);
 
@@ -82,8 +79,7 @@ const serversSection = el('div', 'section', '', [
 
 const groupsBox = el('div');
 const processesSection = el('div', 'section', '', [
-  el('div', 'section-head', '', [el('span', 'label', 'Processes'), el('span', 'grow')]),
-  el('div', 'head-cells', '', [el('b'), el('span', '', 'CPU'), el('span', '', 'Memory')]),
+  el('div', 'section-head', '', [el('span', 'label', 'Processes')]),
   groupsBox,
 ]);
 
@@ -94,7 +90,7 @@ const outsideSection = el('div', 'section', '', [
 ]);
 outsideSection.hidden = true;
 
-const footnote = el('div', 'footnote', 'CPU is a share of the whole machine, so rows add up. Memory is resident memory: pages a process shares with others count in each of them.');
+const footnote = el('div', 'footnote', 'Process CPU counts 100% per core, as Activity Monitor does. The CPU card above is the whole machine. Memory is resident memory: pages a process shares with others count in each of them.');
 
 root.append(banner, head, grid, appCard, serversSection, processesSection, outsideSection, footnote);
 
@@ -120,19 +116,15 @@ const chevron = (): SVGSVGElement => {
 
 const groupColor = (id: GroupId): string => COLORS[id];
 
-const processRow = (process: ProcessRow, largest: number, color: string): HTMLElement => {
-  const who = el('div', 'who');
-  who.style.paddingInlineStart = `${process.depth * 14}px`;
-  if (process.depth > 0) who.append(el('span', 'tick'));
-  who.append(el('span', 'pname', process.name));
-  for (const port of process.ports) who.append(el('span', 'port', `:${port}`));
-  const args = commandArguments(process.name, process.command);
-  if (args) who.append(el('span', 'pcmd', args));
-  const bar = el('i');
-  bar.style.width = `${Math.max(2, (process.memory / Math.max(1, largest)) * 100)}%`;
-  bar.style.background = color;
-  const mem = el('span', 'cell mem num', formatBytes(process.memory), [bar]);
-  const row = el('div', 'proc', '', [who, el('span', 'cell num', formatPercent(process.cpu)), mem]);
+// Below one percent of a core a number is noise; it stays readable but recedes.
+const cpuCell = (value: number | null): HTMLElement => el('span', value !== null && value >= 1 ? 'cell num' : 'cell num quiet', formatPercent(value));
+
+const processRow = (process: ProcessRow, role: 'root' | 'self' | 'other'): HTMLElement => {
+  const { title, detail } = processLabel(process, role);
+  const who = el('div', 'who', '', [el('span', 'pname', title)]);
+  if (detail) who.append(el('span', 'pdetail', detail));
+  const row = el('div', 'proc', '', [who, cpuCell(process.cpu), el('span', 'cell num', formatBytes(process.memory))]);
+  row.style.setProperty('--depth', String(process.depth));
   row.title = `${process.name} · pid ${process.pid}${process.command ? `\n${process.command}` : ''}`;
   return row;
 };
@@ -146,7 +138,7 @@ interface GroupLike {
   hidden: number;
 }
 
-const renderGroup = (group: GroupLike, label: string, color: string): HTMLElement => {
+const renderGroup = (group: GroupLike, label: string, color: string, roleOf: (row: ProcessRow) => 'root' | 'self' | 'other'): HTMLElement => {
   const details = document.createElement('details');
   details.className = 'group';
   details.open = openGroups.has(group.id);
@@ -154,18 +146,22 @@ const renderGroup = (group: GroupLike, label: string, color: string): HTMLElemen
     if (details.open) openGroups.add(group.id);
     else openGroups.delete(group.id);
   });
-  const swatch = el('span', 'swatch');
-  swatch.style.background = color;
+  const dot = el('span', 'dot');
+  dot.style.background = color;
   const total = group.processes.length + group.hidden;
-  const name = el('span', 'name', label, [el('span', 'count', `${total}`)]);
+  const name = el('span', 'gname', '', [chevron(), dot, el('b', '', label), el('span', 'count', String(total))]);
   const summary = document.createElement('summary');
-  summary.append(chevron(), swatch, name, el('span', 'num muted', formatPercent(group.cpu)), el('span', 'num', formatBytes(group.memory)));
-  const largest = Math.max(0, ...group.processes.map((process) => process.memory));
-  const rows = el('div', 'rows', '', group.processes.map((process) => processRow(process, largest, color)));
-  if (group.hidden > 0) rows.append(el('div', 'more', `${group.hidden} more, smaller processes not shown`));
+  summary.append(name, cpuCell(group.cpu), el('span', 'cell num', formatBytes(group.memory)));
+  const rows = el('div', 'rows', '', group.processes.map((process) => processRow(process, roleOf(process))));
+  if (group.hidden > 0) rows.append(el('div', 'more', `${group.hidden} smaller processes not shown`));
   details.append(summary, rows);
   return details;
 };
+
+const processTable = (groups: HTMLElement[]): HTMLElement => el('div', 'table', '', [
+  el('div', 'thead', '', [el('span', '', 'Process'), el('span', 'cell', 'CPU'), el('span', 'cell', 'Memory')]),
+  ...groups,
+]);
 
 const renderServer = (server: DevServer): HTMLElement => {
   const title = el('div', 'title', '', [
@@ -217,25 +213,12 @@ const render = (snapshot: Snapshot): void => {
   cpu.side.textContent = `${system.cores} cores`;
   cpu.sub.textContent = system.load ? `Load ${system.load.map((value) => value.toFixed(2)).join(' · ')}` : 'All cores together';
   cpu.chart.update(snapshot.history.system.cpu, 100);
-  cores.replaceChildren(...system.perCore.map((value) => {
-    const fill = el('span');
-    fill.style.height = `${Math.max(4, value)}%`;
-    fill.style.background = COLORS.cpu;
-    const core = el('div', 'core', '', [fill]);
-    core.title = formatPercent(value);
-    return core;
-  }));
 
   // Memory
   memory.value.textContent = formatBytes(system.memoryUsed);
   memory.side.textContent = formatPercent((system.memoryUsed / Math.max(1, system.memoryTotal)) * 100);
   memory.sub.textContent = `of ${formatBytes(system.memoryTotal)} · ${formatBytes(Math.max(0, system.memoryTotal - system.memoryUsed))} free`;
   memory.chart.update(snapshot.history.system.memory, system.memoryTotal);
-  const appInUsed = Math.min(app.memory, system.memoryUsed);
-  renderStack(memoryShare, [
-    { value: appInUsed, color: COLORS.app, label: `OpenChamber ${formatBytes(app.memory)}` },
-    { value: system.memoryUsed - appInUsed, color: COLORS.memory, label: `Everything else ${formatBytes(system.memoryUsed - appInUsed)}` },
-  ], system.memoryTotal);
 
   // OpenChamber footprint
   appValue.textContent = formatBytes(app.memory);
@@ -262,7 +245,8 @@ const render = (snapshot: Snapshot): void => {
   serversEmpty.hidden = snapshot.servers.length > 0;
 
   // Processes
-  groupsBox.replaceChildren(...app.groups.map((group) => renderGroup(group, GROUP_LABELS[group.id], groupColor(group.id))));
+  const roleOf = (row: ProcessRow): 'root' | 'self' | 'other' => (row.pid === app.rootPid ? 'root' : row.name === 'Resource Monitor' && row.ppid === app.rootPid ? 'self' : 'other');
+  groupsBox.replaceChildren(processTable(app.groups.map((group) => renderGroup(group, GROUP_LABELS[group.id], groupColor(group.id), roleOf))));
 
   // OpenCode elsewhere on this machine
   outsideSection.hidden = snapshot.outside.length === 0;
@@ -270,11 +254,12 @@ const render = (snapshot: Snapshot): void => {
     const cpuSum = snapshot.outside.reduce((sum, row) => sum + (row.cpu ?? 0), 0);
     const memorySum = snapshot.outside.reduce((sum, row) => sum + row.memory, 0);
     // Each row already carries its children's totals.
-    outsideBox.replaceChildren(renderGroup(
+    outsideBox.replaceChildren(processTable([renderGroup(
       { id: 'outside', cpu: cpuSum, memory: memorySum, processes: snapshot.outside, hidden: 0 },
       'OpenCode',
       'var(--oc-muted)',
-    ));
+      () => 'other',
+    )]));
   }
 
   // Problems the snapshot reported

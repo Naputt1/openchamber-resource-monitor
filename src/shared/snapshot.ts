@@ -4,7 +4,11 @@
 /** Points of history the service keeps: three minutes at one sample every two seconds. */
 export const HISTORY_POINTS = 90;
 
-/** CPU is a share of the whole machine, 0..100, so numbers add up across rows. */
+/**
+ * CPU of a process, a group or a dev server counts 100 per core, as Activity
+ * Monitor and `top` do, so 250 is two and a half cores busy. Only the
+ * machine's own CPU (`SystemStats.cpu`) is a share of all cores, 0..100.
+ */
 export type Percent = number;
 
 export type GroupId = 'app' | 'opencode' | 'terminals';
@@ -63,7 +67,6 @@ export interface SystemStats {
   cpuModel: string;
   cores: number;
   cpu: Percent | null;
-  perCore: Percent[];
   /** 1, 5 and 15 minute load; `null` on Windows, which has none. */
   load: [number, number, number] | null;
   memoryTotal: number;

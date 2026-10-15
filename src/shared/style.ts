@@ -36,9 +36,6 @@ export const PANEL_STYLE = `
   .big { font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
   .card-top .grow { flex: 1; }
   .sub { color: var(--oc-muted); font-size: 11px; }
-  .cores { display: flex; align-items: flex-end; gap: 2px; height: 18px; }
-  .core { flex: 1; min-width: 2px; height: 100%; border-radius: 2px; background: var(--oc-muted-surface, var(--oc-hover)); position: relative; overflow: hidden; }
-  .core > span { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 2px; transition: height .4s ease; }
   .stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--oc-muted-surface, var(--oc-hover)); }
   .stack > span { height: 100%; transition: width .4s ease; }
   .stack > span + span { box-shadow: -1px 0 0 var(--oc-elevated); }
@@ -59,29 +56,28 @@ export const PANEL_STYLE = `
   .origin { font-size: 10px; padding: 0 5px; border-radius: 4px; line-height: 16px; border: 1px solid var(--oc-border); color: var(--oc-muted); }
   .server .stats { text-align: right; white-space: nowrap; }
   .server .command { grid-column: 1 / -1; color: var(--oc-muted); font: 11px var(--oc-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  details.group { border: 1px solid var(--oc-border); border-radius: var(--oc-radius); overflow: hidden; }
-  details.group + details.group { margin-top: 6px; }
-  details.group > summary { list-style: none; display: grid; grid-template-columns: 12px 8px minmax(0, 1fr) auto auto; align-items: center;
-    gap: 8px; padding: 8px 12px; cursor: pointer; user-select: none; }
+  .table { border: 1px solid var(--oc-border); border-radius: var(--oc-radius); overflow: hidden; }
+  .thead, details.group > summary, .proc { display: grid; grid-template-columns: minmax(0, 1fr) 60px 72px; align-items: center; column-gap: 8px; }
+  .thead { padding: 6px 12px; color: var(--oc-muted); font-size: 11px; border-bottom: 1px solid var(--oc-border); }
+  .cell { text-align: right; white-space: nowrap; }
+  .quiet { color: var(--oc-muted); }
+  details.group + details.group { border-top: 1px solid var(--oc-border); }
+  details.group > summary { list-style: none; padding: 8px 12px; cursor: pointer; user-select: none; }
   details.group > summary::-webkit-details-marker { display: none; }
   details.group > summary:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; }
-  .chevron { width: 12px; height: 12px; color: var(--oc-muted); transition: transform .15s ease; }
+  .gname { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .gname b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gname .count { color: var(--oc-muted); }
+  .chevron { flex: none; width: 12px; height: 12px; color: var(--oc-muted); transition: transform .15s ease; }
   details.group[open] .chevron { transform: rotate(90deg); }
-  .swatch { width: 8px; height: 8px; border-radius: 2px; }
-  summary .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  summary .count { color: var(--oc-muted); font-weight: 400; margin-left: 4px; }
-  .rows { border-top: 1px solid var(--oc-border); padding: 4px 0; }
-  .proc { display: grid; grid-template-columns: minmax(0, 1fr) 52px 64px; align-items: center; gap: 8px; padding: 3px 12px; }
-  .proc .who { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .proc .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; max-width: 70%; }
-  .proc .pcmd { color: var(--oc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px var(--oc-mono); min-width: 0; }
-  .proc .tick { flex: none; width: 8px; height: 1px; background: var(--oc-border); }
-  .proc .cell { text-align: right; white-space: nowrap; }
-  .proc .mem { position: relative; }
-  .proc .mem i { position: absolute; right: 0; bottom: -3px; height: 2px; border-radius: 1px; opacity: .55; }
-  .more { color: var(--oc-muted); padding: 4px 12px; }
-  .head-cells { display: grid; grid-template-columns: minmax(0, 1fr) 52px 64px; gap: 8px; padding: 0 12px; color: var(--oc-muted); font-size: 11px; }
-  .head-cells span { text-align: right; }
+  .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+  .rows { padding: 0 0 6px; }
+  /* Names line up under the group name (past the chevron and dot), then step in per level. */
+  .proc { padding: 4px 12px 4px calc(36px + var(--depth, 0) * 14px); }
+  .who { display: flex; flex-direction: column; min-width: 0; }
+  .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pdetail { color: var(--oc-muted); font: 11px/1.35 var(--oc-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .more { color: var(--oc-muted); padding: 4px 12px 2px 36px; }
   .banner { padding: 8px 12px; border-radius: var(--oc-radius); border: 1px solid color-mix(in srgb, var(--oc-warning) 40%, transparent);
     background: color-mix(in srgb, var(--oc-warning) 10%, transparent); color: var(--oc-warning-text, var(--oc-fg)); }
   .banner.error { border-color: color-mix(in srgb, var(--oc-error) 40%, transparent); background: color-mix(in srgb, var(--oc-error) 10%, transparent);

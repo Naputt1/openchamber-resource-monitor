@@ -1,6 +1,6 @@
 {
   "name": "openchamber-resource-monitor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "CPU and memory of your machine, of OpenChamber and OpenCode with everything they started, and of the dev servers running under them",
   "private": true,
   "type": "module",

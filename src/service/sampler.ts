@@ -53,23 +53,21 @@ export class Sampler {
     this.history = { system: { cpu: [], memory: [] }, app: { cpu: [], memory: [] } };
   }
 
-  private systemCpu(): { total: Percent | null; perCore: Percent[] } {
+  /** The machine's CPU as a share of all cores. */
+  private systemCpu(): Percent | null {
     const now = cpuTimes();
     const before = this.previousCores;
     this.previousCores = now;
-    if (!before || before.length !== now.length) return { total: null, perCore: [] };
+    if (!before || before.length !== now.length) return null;
     let idle = 0;
     let total = 0;
-    const perCore = now.map((core, index) => {
+    now.forEach((core, index) => {
       const previous = before[index];
-      if (!previous) return 0;
-      const coreIdle = core.idle - previous.idle;
-      const coreTotal = core.total - previous.total;
-      idle += coreIdle;
-      total += coreTotal;
-      return coreTotal > 0 ? clampPercent(100 * (1 - coreIdle / coreTotal)) : 0;
+      if (!previous) return;
+      idle += core.idle - previous.idle;
+      total += core.total - previous.total;
     });
-    return { total: total > 0 ? clampPercent(100 * (1 - idle / total)) : null, perCore };
+    return total > 0 ? clampPercent(100 * (1 - idle / total)) : null;
   }
 
   private processCpu(processes: readonly RawProcess[], at: number, cores: number): Map<number, Percent | null> {
@@ -85,7 +83,8 @@ export class Sampler {
         continue;
       }
       const used = Math.max(0, process.cpuSeconds - previous.seconds);
-      cpu.set(process.pid, clampPercent((100 * used) / elapsed / cores));
+      // 100 per core, like Activity Monitor; one process can't use more cores than exist.
+      cpu.set(process.pid, Math.min(100 * cores, (100 * used) / elapsed));
     }
     this.previousCpu = next;
     this.previousAt = at;
@@ -129,7 +128,7 @@ export class Sampler {
     const warnings: Warning[] = [];
     const cores = Math.max(1, os.cpus().length);
     const at = Date.now();
-    const { total: systemCpu, perCore } = this.systemCpu();
+    const systemCpu = this.systemCpu();
     let memoryUsed: number;
     try {
       memoryUsed = await this.source.memoryUsed();
@@ -172,7 +171,6 @@ export class Sampler {
       cpuModel: firstCpu?.model.trim() ?? '',
       cores,
       cpu: systemCpu,
-      perCore,
       load: process.platform === 'win32' ? null : [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
       memoryTotal: os.totalmem(),
       memoryUsed,

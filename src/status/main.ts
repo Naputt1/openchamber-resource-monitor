@@ -52,7 +52,7 @@ const render = (snapshot: Snapshot): void => {
   for (const line of [cpuLine, memoryLine]) line.hidden = false;
   appLine.hidden = processesMissing;
   appValue.textContent = `${formatBytes(app.memory)} · ${formatPercent(app.cpu)}`;
-  appValue.title = 'Memory and CPU of OpenChamber, OpenCode, and everything they started';
+  appValue.title = 'Memory and CPU of OpenChamber, OpenCode, and everything they started. CPU counts 100% per core.';
   appChart.update(snapshot.history.app.memory, Math.max(app.memory, ...snapshot.history.app.memory) * 1.15);
   cpuMeter.set(system.cpu ?? 0);
   cpuValue.textContent = formatPercent(system.cpu);
