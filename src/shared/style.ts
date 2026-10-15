@@ -51,7 +51,9 @@ export const PANEL_STYLE = `
   .origin { font-size: 10px; padding: 0 5px; border-radius: 4px; line-height: 16px; border: 1px solid var(--oc-border); color: var(--oc-muted); flex: none; }
   /* Lists sit on the panel itself: rows divided by hairlines, no boxes inside boxes. */
   .list { display: flex; flex-direction: column; }
-  .cols, .row, .group-head { display: grid; grid-template-columns: minmax(0, 1fr) 56px 72px; align-items: center; column-gap: 8px; }
+  .cols, .row, .group-head { display: grid; grid-template-columns: minmax(0, 1fr) auto 56px 72px; align-items: center; column-gap: 8px; }
+  .action { display: flex; align-items: center; justify-content: flex-end; }
+  .action:empty { display: block; }
   .cols { padding: 0 2px 4px; color: var(--oc-muted); font-size: 11px; border-bottom: 1px solid var(--oc-border); }
   .cell { text-align: right; white-space: nowrap; }
   .quiet { color: var(--oc-muted); }
@@ -77,7 +79,11 @@ export const PANEL_STYLE = `
   .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .pname.strong { font-weight: 600; flex: none; max-width: 50%; }
   .pdetail { color: var(--oc-muted); font: 11px/1.35 var(--oc-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .job.foldable { cursor: pointer; }
+  .job.foldable, .group-head.foldable { cursor: pointer; }
+  .group-head.foldable .gname::before { content: ''; flex: none; width: 0; height: 0; margin-right: 1px;
+    border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
+  .group-head.foldable.open .gname::before { transform: rotate(90deg); }
+  .group-head.foldable:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; border-radius: 4px; }
   .job.foldable .title-line::before { content: ''; flex: none; width: 0; height: 0; margin: 0 2px 0 1px;
     border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
   .job.foldable.open .title-line::before { transform: rotate(90deg); }
@@ -91,7 +97,7 @@ export const PANEL_STYLE = `
   .group .row.member .cell { color: var(--oc-muted); }
   .more { color: var(--oc-muted); padding: 2px 2px 4px; font-size: 11px; }
   /* Stop is a text button: no fill, it only changes colour, and asks once before acting. */
-  .stop { flex: none; margin-left: auto; padding: 0 2px; border: 0; background: none; font: 11px var(--oc-font); color: var(--oc-muted); cursor: pointer; }
+  .stop { flex: none; padding: 0 2px; border: 0; background: none; font: 11px var(--oc-font); color: var(--oc-muted); cursor: pointer; }
   .stop:hover, .stop:focus-visible { color: var(--oc-error-text, var(--oc-error)); }
   .stop.armed { color: var(--oc-error-text, var(--oc-error)); font-weight: 600; }
   .stop:disabled { cursor: default; opacity: .6; }

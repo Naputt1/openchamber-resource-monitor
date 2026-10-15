@@ -67,7 +67,9 @@ const appCard = el('div', 'card', '', [
   appLegend,
 ]);
 
-const columns = (): HTMLElement => el('div', 'cols', '', [el('span'), el('span', 'cell', 'CPU'), el('span', 'cell', 'Memory')]);
+// Every row is name · action · CPU · memory, so Stop sits centred beside the numbers.
+const columns = (): HTMLElement => el('div', 'cols', '', [el('span'), el('span'), el('span', 'cell', 'CPU'), el('span', 'cell', 'Memory')]);
+const actionCell = (button?: HTMLElement): HTMLElement => el('span', 'action', '', button ? [button] : []);
 
 const serversCount = el('span', 'count');
 const serversList = el('div', 'list');
@@ -144,8 +146,8 @@ const stopButton = (label: string, question: string, target: StopRequest): HTMLB
 const cpuCell = (value: number | null): HTMLElement => el('span', value !== null && value >= 1 ? 'cell num' : 'cell num quiet', formatPercent(value));
 const memoryCell = (value: number): HTMLElement => el('span', 'cell num', formatBytes(value));
 
-const textBlock = (title: string, detail: string, extra: Node[] = []): HTMLElement => {
-  const titleLine = el('span', 'title-line', '', [el('span', 'pname', title), ...extra]);
+const textBlock = (title: string, detail: string): HTMLElement => {
+  const titleLine = el('span', 'title-line', '', [el('span', 'pname', title)]);
   const block = el('div', 'who', '', [titleLine]);
   if (detail) block.append(el('span', 'pdetail', detail));
   return block;
@@ -153,7 +155,7 @@ const textBlock = (title: string, detail: string, extra: Node[] = []): HTMLEleme
 
 const processRow = (process: ProcessRow, role: 'root' | 'self' | 'other', className = 'row'): HTMLElement => {
   const { title, detail } = processLabel(process, role);
-  const row = el('div', className, '', [textBlock(title, detail), cpuCell(process.cpu), memoryCell(process.memory)]);
+  const row = el('div', className, '', [textBlock(title, detail), actionCell(), cpuCell(process.cpu), memoryCell(process.memory)]);
   row.title = `${process.name} · pid ${process.pid}${process.command ? `\n${process.command}` : ''}`;
   return row;
 };
@@ -165,8 +167,8 @@ const jobRow = (job: Job, stoppable: boolean): HTMLElement => {
   const foldable = job.members.length > 0 && job.count > 1;
   const open = foldable && openJobs.has(job.pid);
   const detail = jobDetail(job);
-  const extra: Node[] = stoppable ? [stopButton('Stop', `Stop ${job.title}?`, { kind: 'job', pid: job.pid, name: job.name })] : [];
-  const line = el('div', foldable ? 'row job foldable' : 'row job', '', [textBlock(job.title, detail, extra), cpuCell(job.cpu), memoryCell(job.memory)]);
+  const stop = stoppable ? stopButton('Stop', `Stop ${job.title}?`, { kind: 'job', pid: job.pid, name: job.name }) : undefined;
+  const line = el('div', foldable ? 'row job foldable' : 'row job', '', [textBlock(job.title, detail), actionCell(stop), cpuCell(job.cpu), memoryCell(job.memory)]);
   line.title = job.command || job.title;
   line.classList.toggle('open', open);
   // Unfolded, commands wrap in full instead of ending in an ellipsis.
@@ -197,19 +199,57 @@ const jobRow = (job: Job, stoppable: boolean): HTMLElement => {
   return wrapper;
 };
 
+// Groups start unfolded; the ones the user folds are remembered on this device.
+const COLLAPSED_KEY = 'collapsed-groups';
+const collapsedGroups = new Set<GroupId>();
+let deviceStorage = false;
+
+const saveCollapsed = (): void => {
+  if (!deviceStorage) return;
+  void host.storage.set(COLLAPSED_KEY, [...collapsedGroups], { scope: 'device' }).catch(() => undefined);
+};
+
+const loadCollapsed = async (): Promise<void> => {
+  if (!deviceStorage) return;
+  try {
+    const stored = await host.storage.get(COLLAPSED_KEY, { scope: 'device' });
+    if (!Array.isArray(stored)) return;
+    for (const id of stored) if (id === 'app' || id === 'opencode' || id === 'terminals') collapsedGroups.add(id);
+    if (lastSnapshot) render(lastSnapshot);
+  } catch {
+    // Unreadable preference: groups stay unfolded.
+  }
+};
+
 const groupBlock = (group: ProcessGroup, roleOf: (row: ProcessRow) => 'root' | 'self' | 'other'): HTMLElement => {
   const dot = el('span', 'dot');
   dot.style.background = COLORS[group.id];
-  const extra: Node[] = [];
-  if (group.id === 'terminals' && group.jobs.length > 0) {
-    extra.push(stopButton('Stop all', 'Stop everything running in the terminal?', { kind: 'terminals' }));
-  }
-  const name = el('span', 'gname', '', [dot, el('b', '', GROUP_LABELS[group.id]), el('span', 'count', String(group.count)), ...extra]);
-  const header = el('div', 'group-head', '', [name, cpuCell(group.cpu), memoryCell(group.memory)]);
+  const stopAll = group.id === 'terminals' && group.jobs.length > 0
+    ? stopButton('Stop all', 'Stop everything running in the terminal?', { kind: 'terminals' })
+    : undefined;
+  const name = el('span', 'gname', '', [dot, el('b', '', GROUP_LABELS[group.id]), el('span', 'count', String(group.count))]);
+  const collapsed = collapsedGroups.has(group.id);
+  const header = el('div', collapsed ? 'group-head foldable' : 'group-head foldable open', '', [name, actionCell(stopAll), cpuCell(group.cpu), memoryCell(group.memory)]);
+  header.tabIndex = 0;
+  header.setAttribute('role', 'button');
+  header.setAttribute('aria-expanded', String(!collapsed));
+  const toggle = (): void => {
+    if (collapsedGroups.has(group.id)) collapsedGroups.delete(group.id);
+    else collapsedGroups.add(group.id);
+    saveCollapsed();
+    if (lastSnapshot) render(lastSnapshot);
+  };
+  header.addEventListener('click', toggle);
+  header.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggle();
+    }
+  });
   // Terminal jobs can be stopped; an agent's job only while it serves a port,
   // since OpenCode's provider CLIs and MCP servers are jobs too.
   const stoppable = (job: Job): boolean => group.id === 'terminals' || (group.id === 'opencode' && job.ports.length > 0);
-  const block = el('div', 'group', '', [
+  const block = el('div', 'group', '', collapsed ? [header] : [
     header,
     ...group.processes.map((process) => processRow(process, roleOf(process))),
     ...group.jobs.map((job) => jobRow(job, stoppable(job))),
@@ -221,11 +261,11 @@ const groupBlock = (group: ProcessGroup, roleOf: (row: ProcessRow) => 'root' | '
 const serverRow = (server: DevServer): HTMLElement => {
   const ports = server.ports.map((port) => el('span', 'port', `:${port}`));
   const title = el('div', 'title-line', '', [...ports, el('span', 'pname strong', server.name), el('span', 'origin', SERVER_ORIGIN[server.group])]);
-  if (server.job) title.append(stopButton('Stop', `Stop ${server.job.title}?`, { kind: 'job', pid: server.job.pid, name: server.job.name }));
+  const stop = server.job ? stopButton('Stop', `Stop ${server.job.title}?`, { kind: 'job', pid: server.job.pid, name: server.job.name }) : undefined;
   const who = el('div', 'who', '', [title]);
   const detail = server.job?.title ?? '';
   if (detail) who.append(el('span', 'pdetail', detail));
-  const row = el('div', 'row server', '', [who, cpuCell(server.cpu), memoryCell(server.memory)]);
+  const row = el('div', 'row server', '', [who, actionCell(stop), cpuCell(server.cpu), memoryCell(server.memory)]);
   row.title = `pid ${server.pid}${server.command ? `\n${server.command}` : ''}`;
   return row;
 };
@@ -338,6 +378,10 @@ let started = false;
 host.onReady((context) => {
   applyHostReady(context, document.documentElement);
   setLocale(context.locale);
+  if (context.features?.deviceStorage === true && !deviceStorage) {
+    deviceStorage = true;
+    void loadCollapsed();
+  }
   if (started) return;
   started = true;
   ({ refresh } = startPolling(host, root, (snapshot) => {
