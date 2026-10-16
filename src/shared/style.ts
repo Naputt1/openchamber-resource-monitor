@@ -11,9 +11,14 @@ export const BASE_STYLE = `
   .chart-cursor, .chart-dot, .chart-tip { position: absolute; pointer-events: none; opacity: 0; }
   .chart.hovering .chart-cursor, .chart.hovering .chart-dot, .chart.hovering .chart-tip { opacity: 1; }
   .chart-cursor { top: 0; bottom: 0; left: 0; width: 1px; background: var(--oc-border); }
-  .chart-dot { top: -3px; left: -3px; width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 0 2px var(--oc-bg); }
+  .chart-dot { top: -3px; left: -3px; width: 6px; height: 6px; border-radius: 50%; box-shadow: 0 0 0 2px color-mix(in srgb, var(--oc-fg) 4%, var(--oc-bg)); }
+  /* Floats like the app's dropdowns: lit top edge and hairline rings instead of a border. The chart clips,
+     so only the rings and the tightest shadow. */
   .chart-tip { top: 2px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; font-size: 11px;
-    background: var(--oc-elevated); color: var(--oc-elevated-fg); border: 1px solid var(--oc-border); font-variant-numeric: tabular-nums; }
+    background: var(--oc-elevated); color: var(--oc-elevated-fg); font-variant-numeric: tabular-nums;
+    box-shadow: inset 0 1px 0 0 rgb(255 255 255 / .8), inset 0 0 0 1px rgb(0 0 0 / .04), 0 0 0 1px rgb(0 0 0 / .1), 0 1px 2px -.5px rgb(0 0 0 / .08); }
+  [data-oc-theme="dark"] .chart-tip { box-shadow: inset 0 1px 0 0 rgb(255 255 255 / .06), inset 0 0 0 1px rgb(255 255 255 / .08),
+    0 0 0 1px rgb(0 0 0 / .36), 0 1px 1px -.5px rgb(0 0 0 / .22); }
   .port { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 4px; font: 11px var(--oc-mono);
     background: color-mix(in srgb, var(--oc-primary) 14%, transparent); color: var(--oc-primary-text, var(--oc-primary)); }
 `;
@@ -29,16 +34,17 @@ export const PANEL_STYLE = `
   .live::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--oc-success); }
   .live.stale::before { background: var(--oc-muted); }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
-  .card { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--oc-border);
-    border-radius: var(--oc-radius); background: var(--oc-elevated); color: var(--oc-elevated-fg); }
+  /* Cards are flat and set apart by tone, like the app's tiles: no border. */
+  .card { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 12px;
+    border-radius: var(--oc-radius); background: color-mix(in srgb, var(--oc-fg) 4%, transparent); }
   .card-top { display: flex; align-items: baseline; gap: 8px; }
   .label { font-size: 11px; font-weight: 600; letter-spacing: .02em; color: var(--oc-muted); text-transform: uppercase; }
   .big { font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -.01em; }
   .card-top .grow { flex: 1; }
   .sub { color: var(--oc-muted); font-size: 11px; }
-  .stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--oc-muted-surface, var(--oc-hover)); }
+  /* A track inside a card is the next tone step; segments part by a 1px gap. */
+  .stack { display: flex; gap: 1px; height: 8px; border-radius: 4px; overflow: hidden; background: color-mix(in srgb, var(--oc-fg) 8%, transparent); }
   .stack > span { height: 100%; transition: width .4s ease; }
-  .stack > span + span { box-shadow: -1px 0 0 var(--oc-elevated); }
   .legend { display: flex; flex-direction: column; gap: 4px; }
   .legend-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; }
   .legend-row .swatch { width: 8px; height: 8px; border-radius: 2px; }
@@ -48,8 +54,8 @@ export const PANEL_STYLE = `
   .section-head { display: flex; align-items: baseline; gap: 8px; padding: 0 2px; }
   .section-head .grow { flex: 1; }
   .empty { color: var(--oc-muted); padding: 6px 2px; }
-  .origin { font-size: 10px; padding: 0 5px; border-radius: 4px; line-height: 16px; border: 1px solid var(--oc-border); color: var(--oc-muted); flex: none; }
-  /* Lists sit on the panel itself: rows divided by hairlines, no boxes inside boxes. */
+  .origin { font-size: 10px; padding: 0 5px; border-radius: 4px; line-height: 16px; background: color-mix(in srgb, var(--oc-fg) 6%, transparent); color: var(--oc-muted); flex: none; }
+  /* Lists sit on the panel itself, grouped by space: lines only under the column header and between groups. */
   .list { display: flex; flex-direction: column; }
   .cols, .row, .group-head { display: grid; grid-template-columns: minmax(0, 1fr) auto 56px 72px; align-items: center; column-gap: 8px; }
   .action { display: flex; align-items: center; justify-content: flex-end; }
@@ -59,15 +65,14 @@ export const PANEL_STYLE = `
   .quiet { color: var(--oc-muted); }
   /* Three levels, told apart by size, weight and indent rather than boxes:
      group heading, rows on a rail in the group's colour, unfolded members deeper and quieter. */
-  .row { padding: 7px 2px; border-bottom: 1px solid color-mix(in srgb, var(--oc-border) 55%, transparent); }
-  .list > .row:last-child { border-bottom-color: transparent; }
+  .row { padding: 7px 2px; }
   .group { display: flex; flex-direction: column; padding: 4px 0 10px; border-bottom: 1px solid var(--oc-border); }
   .group-head { padding: 12px 2px 6px; font-size: 13px; }
   .group-head .cell { font-weight: 600; }
   .group > .row, .group > .job-wrap { margin-left: 4px; padding-left: 12px;
     border-left: 2px solid color-mix(in srgb, var(--group-color, var(--oc-border)) 40%, transparent); }
-  .group > .row { padding-top: 5px; padding-bottom: 5px; border-bottom: none; }
-  .group > .job-wrap > .row { padding: 5px 2px; border-bottom: none; }
+  .group > .row { padding-top: 5px; padding-bottom: 5px; }
+  .group > .job-wrap > .row { padding: 5px 2px; }
   .group .row .cell { color: color-mix(in srgb, var(--oc-fg) 80%, transparent); }
   .group .row .cell.quiet { color: var(--oc-muted); }
   .gname { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -83,15 +88,15 @@ export const PANEL_STYLE = `
   .group-head.foldable .gname::before { content: ''; flex: none; width: 0; height: 0; margin-right: 1px;
     border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
   .group-head.foldable.open .gname::before { transform: rotate(90deg); }
-  .group-head.foldable:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; border-radius: 4px; }
+  /* Focus draws no ring, like the app: a focused row takes the hover fill. */
+  .group-head.foldable:focus-visible, .job.foldable:focus-visible { outline: none; border-radius: 4px; background: var(--oc-hover); }
   .job.foldable .title-line::before { content: ''; flex: none; width: 0; height: 0; margin: 0 2px 0 1px;
     border-left: 4px solid var(--oc-muted); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent; transition: transform .15s ease; }
   .job.foldable.open .title-line::before { transform: rotate(90deg); }
-  .job.foldable:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: -2px; border-radius: 4px; }
   .job-wrap.open .pdetail { white-space: normal; overflow-wrap: anywhere; }
   .pdetail { user-select: text; }
   .members { display: flex; flex-direction: column; padding: 0 0 6px 16px; }
-  .row.member { padding: 3px 2px; border-bottom: none; font-size: 11.5px; }
+  .row.member { padding: 3px 2px; font-size: 11.5px; }
   .row.member .pname { color: var(--oc-muted); }
   .row.member .pdetail { font-size: 10.5px; }
   .group .row.member .cell { color: var(--oc-muted); }
@@ -101,10 +106,11 @@ export const PANEL_STYLE = `
   .stop:hover, .stop:focus-visible { color: var(--oc-error-text, var(--oc-error)); }
   .stop.armed { color: var(--oc-error-text, var(--oc-error)); font-weight: 600; }
   .stop:disabled { cursor: default; opacity: .6; }
-  .stop:focus-visible { outline: 2px solid var(--oc-focus); outline-offset: 1px; border-radius: 3px; }
-  .banner { padding: 8px 12px; border-radius: var(--oc-radius); border: 1px solid color-mix(in srgb, var(--oc-warning) 40%, transparent);
+  .stop:focus-visible { outline: none; }
+  /* The tint says warning or error; no border. */
+  .banner { padding: 8px 12px; border-radius: var(--oc-radius);
     background: color-mix(in srgb, var(--oc-warning) 10%, transparent); color: var(--oc-warning-text, var(--oc-fg)); }
-  .banner.error { border-color: color-mix(in srgb, var(--oc-error) 40%, transparent); background: color-mix(in srgb, var(--oc-error) 10%, transparent);
+  .banner.error { background: color-mix(in srgb, var(--oc-error) 10%, transparent);
     color: var(--oc-error-text, var(--oc-fg)); }
   .footnote { color: var(--oc-muted); font-size: 11px; padding: 0 2px; }
   [hidden] { display: none !important; }
@@ -116,7 +122,7 @@ export const STATUS_STYLE = `
   .line { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 18px; }
   .line .what { color: var(--oc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line .value { text-align: right; white-space: nowrap; }
-  .meter { position: relative; height: 4px; border-radius: 2px; background: var(--oc-muted-surface, var(--oc-hover)); overflow: hidden; }
+  .meter { position: relative; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--oc-fg) 8%, transparent); overflow: hidden; }
   .meter > span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; transition: width .4s ease; }
   .ports { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
   .note { color: var(--oc-muted); }
