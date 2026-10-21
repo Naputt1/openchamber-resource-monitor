@@ -2,6 +2,7 @@
 // rail tab, a folded section) asks nothing, so the service idles and stops.
 import { HostRequestError, type HostClient } from '@openchamber/sdk';
 
+import { el } from './dom.ts';
 import type { Snapshot } from './snapshot.ts';
 
 export const POLL_MS = 2_000;
@@ -47,6 +48,18 @@ export const requestStop = async (host: HostClient, target: StopRequest): Promis
   } catch {
     return false;
   }
+};
+
+/** A dev server's port: a click opens it, in the desktop app beside the chat. */
+export const portButton = (host: HostClient, port: number): HTMLButtonElement => {
+  const button = el('button', 'port', `:${port}`);
+  button.type = 'button';
+  button.title = `Open http://localhost:${port}`;
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    void host.openUrl(`http://localhost:${port}`).catch(() => undefined);
+  });
+  return button;
 };
 
 export const isOnScreen = (root: HTMLElement): boolean => !document.hidden && root.getBoundingClientRect().width > 0;

@@ -4,7 +4,7 @@ import { connectHost } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import { mountChart } from '../shared/chart.ts';
-import { FAILURE_TEXT, POLL_MS, startPolling } from '../shared/client.ts';
+import { FAILURE_TEXT, POLL_MS, portButton, startPolling } from '../shared/client.ts';
 import { el } from '../shared/dom.ts';
 import { COLORS, formatBytes, formatPercent, setLocale } from '../shared/format.ts';
 import { HISTORY_POINTS, type Snapshot } from '../shared/snapshot.ts';
@@ -60,7 +60,7 @@ const render = (snapshot: Snapshot): void => {
   memoryValue.textContent = `${formatBytes(system.memoryUsed)} / ${formatBytes(system.memoryTotal)}`;
   const listening = [...new Set(snapshot.servers.flatMap((server) => server.ports))].sort((a, b) => a - b);
   serversLine.hidden = listening.length === 0 || processesMissing;
-  ports.replaceChildren(...listening.slice(0, 6).map((port) => el('span', 'port', `:${port}`)));
+  ports.replaceChildren(...listening.slice(0, 6).map((port) => portButton(host, port)));
   serversValue.textContent = listening.length > 6 ? `+${listening.length - 6}` : '';
 };
 

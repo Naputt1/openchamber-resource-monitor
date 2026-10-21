@@ -2,7 +2,7 @@ import { connectHost } from '@openchamber/sdk';
 import { applyHostReady } from '@openchamber/sdk/ui';
 
 import { mountChart } from '../shared/chart.ts';
-import { FAILURE_TEXT, POLL_MS, requestStop, startPolling, type PollFailure, type StopRequest } from '../shared/client.ts';
+import { FAILURE_TEXT, POLL_MS, portButton, requestStop, startPolling, type PollFailure, type StopRequest } from '../shared/client.ts';
 import {
   COLORS,
   GROUP_LABELS,
@@ -259,7 +259,7 @@ const groupBlock = (group: ProcessGroup, roleOf: (row: ProcessRow) => 'root' | '
 };
 
 const serverRow = (server: DevServer): HTMLElement => {
-  const ports = server.ports.map((port) => el('span', 'port', `:${port}`));
+  const ports = server.ports.map((port) => portButton(host, port));
   const title = el('div', 'title-line', '', [...ports, el('span', 'pname strong', server.name), el('span', 'origin', SERVER_ORIGIN[server.group])]);
   const stop = server.job ? stopButton('Stop', `Stop ${server.job.title}?`, { kind: 'job', pid: server.job.pid, name: server.job.name }) : undefined;
   const who = el('div', 'who', '', [title]);
